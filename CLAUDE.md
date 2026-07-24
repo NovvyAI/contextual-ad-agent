@@ -19,7 +19,8 @@
 
 - ✅ **M0** — 项目骨架（详见 `docs/milestones/M0.md`）
 - ✅ **M1** — StoryboardAgent + AdLibraryAgent（批处理分析层，详见 `docs/milestones/M1.md`）
-- ⬜ **M2** — SessionAgent + DirectorAgent（会话调度层 + 创意方案层）—— **下一步**
+- ✅ **M2** — SessionAgent + DirectorAgent（会话调度层 + 创意方案层，详见 `docs/milestones/M2.md`）
+- ⬜ **M3** — 执行层：BridgeVideoAgent / PlayableAgent / OverlayAgent（三种桥接形式的实际生成）—— **下一步**
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 

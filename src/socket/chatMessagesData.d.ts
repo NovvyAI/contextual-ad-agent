@@ -24,9 +24,21 @@ export type SuggestionContent = ChatBaseContent<'suggestion', { title: string; p
 export type AttachmentContent = ChatBaseContent<'attachment', { fileType: AttachmentType; size?: number; name?: string; url?: string; isReference?: boolean; width?: number; height?: number; extension?: string; metadata?: Record<string, any> }[]>;
 export type ToolCallContent = ChatBaseContent<'toolcall', { toolCallId: string; toolCallName: string; eventType?: ToolCallEventType; parentMessageId?: string; args?: string; chunk?: string; result?: string }>;
 export type ActivityContent<T = Record<string, any>> = ChatBaseContent<'activity', { activityType: string; messageId?: string; content: T; deltaInfo?: { fromIndex: number; toIndex: number } }>;
+// M2: DirectorAgent 产出的创意方案候选卡片。storyboardCut/videoCandidate/supervisorResult 属于 M3/M4，暂不添加。
+export type PlanCandidateContent = ChatBaseContent<'planCandidate', {
+  id: number;
+  adId: number;
+  adName?: string;
+  formatSequence: string[];
+  narrative: string;
+  tone: string;
+  planEvaluatorScore: number;
+  status: 'draft' | 'approved' | 'rejected';
+  evaluatorFeedback?: { narrativeFeasibility: number; formatFit: number; adAlignment: number; feedback: string };
+}>;
 
 // 聚合内容类型
-export type AIMessageContent = TextContent | MarkdownContent | ImageContent | ThinkingContent | SearchContent | SuggestionContent | ReasoningContent | ToolCallContent | ActivityContent;
+export type AIMessageContent = TextContent | MarkdownContent | ImageContent | ThinkingContent | SearchContent | SuggestionContent | ReasoningContent | ToolCallContent | ActivityContent | PlanCandidateContent;
 export type ReasoningContent = ChatBaseContent<'reasoning', AIMessageContent[]>;
 export type UserMessageContent = TextContent | AttachmentContent;
 

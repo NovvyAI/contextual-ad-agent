@@ -37,6 +37,11 @@ export default async (knex: Knex): Promise<void> => {
   await addColumn("ab_ad", "analysisResult", "text");
   // ab_episode 建表时就有 errorReason，ab_ad 当时漏加了，这里补上，保持两张表状态字段对称
   await addColumn("ab_ad", "errorReason", "text");
+  // M2: SessionAgent 驱动的会话工作流阶段，和 ab_episode.status（StoryboardAgent 的分析流水线状态）是两个不同的轴
+  await addColumn("ab_episode", "workflowStage", "text");
+  if (await knex.schema.hasTable("ab_episode")) {
+    await knex("ab_episode").whereNull("workflowStage").update({ workflowStage: "uploaded" });
+  }
   void dropColumn;
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，

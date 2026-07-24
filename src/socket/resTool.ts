@@ -12,6 +12,7 @@ import type {
   ToolCallContent,
   ActivityContent,
   ReasoningContent,
+  PlanCandidateContent,
 } from "./chatMessagesData";
 
 type ContentType = AIMessageContent["type"];
@@ -182,6 +183,24 @@ class MessageBuilder {
     const contentId = u.uuid();
     const content: ImageContent = {
       type: "image",
+      id: contentId,
+      data,
+      status: "complete",
+    };
+
+    this.socket.emit("content:add", {
+      messageId: this.messageId,
+      content,
+    });
+
+    return this;
+  }
+
+  // 添加创意方案候选卡片（M2 DirectorAgent 产出）
+  planCandidate(data: PlanCandidateContent["data"]) {
+    const contentId = u.uuid();
+    const content: PlanCandidateContent = {
+      type: "planCandidate",
       id: contentId,
       data,
       status: "complete",
