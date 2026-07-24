@@ -140,8 +140,8 @@ export async function runDecisionAI(ctx: AgentContext): Promise<void> {
   const plansContext = await buildPlansContext(ctx.episodeId);
 
   const { fullStream } = await u.Ai.Text(MODEL_KEY).stream({
+    system: systemPrompt,
     messages: [
-      { role: "system", content: systemPrompt },
       { role: "assistant", content: plansContext },
       { role: "user", content: ctx.text },
     ],

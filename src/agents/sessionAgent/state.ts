@@ -68,3 +68,34 @@ export async function createBridgeCuts(episodeId: number, creativePlanId: number
   }
   return rows;
 }
+
+/**
+ * M4：纯守卫，不改数据——确认这份方案已经具备落地前终审的条件：
+ * 处于 content_review、方案已批准、方案下唯一一个 cut（正式路径下的不变量，legacy 多 cut 测试数据会在这里被挡住）、
+ * cut 已完成生成且有已选定的最终产物。满足才返回这个 cut 的引用，不满足直接抛错。
+ */
+export async function assertContentReady(episodeId: number, creativePlanId: number): Promise<BridgeCutRef> {
+  const episode = await getEpisodeOrThrow(episodeId);
+  if (episode.workflowStage !== "content_review") {
+    throw new Error(`Episode ${episodeId} 当前阶段是 ${episode.workflowStage}，不在内容评审阶段`);
+  }
+  const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
+  if (!plan || plan.episodeId !== episodeId) throw new Error(`创意方案 ${creativePlanId} 不属于 Episode ${episodeId}`);
+  if (plan.status !== "approved") throw new Error(`创意方案 ${creativePlanId} 还没有被确认`);
+
+  const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId);
+  if (cuts.length !== 1) throw new Error(`创意方案 ${creativePlanId} 应该只有一个内容 cut，实际 ${cuts.length} 个，无法落地`);
+  const cut = cuts[0];
+  if (cut.id == null || cut.type == null) throw new Error(`Cut 数据不完整`);
+  if (cut.status !== "done") throw new Error(`内容 cut ${cut.id} 当前状态是 ${cut.status}，还没生成完成`);
+
+  const selected = await u.db("ab_generatedSegment").where("bridgeCutId", cut.id).where("stage", "finalRender").where("isSelected", 1).first();
+  if (!selected) throw new Error(`内容 cut ${cut.id} 没有已选定的最终产物`);
+
+  return { id: cut.id, index: cut.index ?? 0, type: cut.type };
+}
+
+/** M4：纯变更，只在 SupervisorAgent 通过且 Assembler 跑完之后调用 */
+export async function enterAssembling(episodeId: number): Promise<void> {
+  await u.db("ab_episode").where("id", episodeId).update({ workflowStage: "assembling" });
+}

@@ -44,7 +44,9 @@ function rowFromPlanAndEvaluation(episodeId: number, plan: PlanDraft, evaluation
   return {
     episodeId,
     adId: plan.adId,
-    formatSequence: JSON.stringify(plan.formatSequence),
+    // DB 列/下游（SessionAgent、socket 协议）仍然按 formatSequence 数组消费，这里只是把单一 format
+    // 包成长度为 1 的数组存进去——既满足"结构上排除组合"（LLM 侧 schema 只产出单值），又不用动 M3 已经上线的代码。
+    formatSequence: JSON.stringify([plan.format]),
     narrative: plan.narrative,
     tone: plan.tone,
     planEvaluatorScore: overallScore,
@@ -96,7 +98,8 @@ export async function revisePlan(planId: number, feedback: string): Promise<Crea
     throw new Error(`创意方案 ${planId} 数据不完整`);
   }
   const episodeAnalysis = await loadEpisodeAnalysis(row.episodeId);
-  const existingPlan: PlanDraft = { adId: row.adId, formatSequence: JSON.parse(row.formatSequence), narrative: row.narrative, tone: row.tone };
+  const storedFormats: string[] = JSON.parse(row.formatSequence);
+  const existingPlan: PlanDraft = { adId: row.adId, format: storedFormats[0] as PlanDraft["format"], narrative: row.narrative, tone: row.tone };
 
   const { object: revised } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planGenerationSchema.shape.plans.element,

@@ -63,6 +63,25 @@ export type ContentCandidateContent = ChatBaseContent<'contentCandidate', {
   evaluatorScore: number;
   evaluatorFeedback?: string;
 }>;
+// M4: SupervisorAgent 落地前终审结果——真正的拦截判定，不是参考分
+export type SupervisorResultContent = ChatBaseContent<'supervisorResult', {
+  bridgeCutId: number;
+  passed: boolean;
+  contentCompliance: number;
+  brandSafety: number;
+  technicalSpec: number;
+  issues: string[];
+  feedback: string;
+}>;
+// M4: Assembler 组装完成后的最终交付物
+export type ManifestContent = ChatBaseContent<'manifest', {
+  manifestId: number;
+  episodeId: number;
+  creativePlanId: number;
+  type: string;
+  deliverableUrl: string;
+  ctaUrl?: string;
+}>;
 
 // 聚合内容类型
 export type AIMessageContent =
@@ -78,7 +97,9 @@ export type AIMessageContent =
   | PlanCandidateContent
   | StoryboardCutContent
   | VideoCandidateContent
-  | ContentCandidateContent;
+  | ContentCandidateContent
+  | SupervisorResultContent
+  | ManifestContent;
 export type ReasoningContent = ChatBaseContent<'reasoning', AIMessageContent[]>;
 export type UserMessageContent = TextContent | AttachmentContent;
 

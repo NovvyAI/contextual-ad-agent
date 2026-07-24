@@ -6,6 +6,8 @@ import * as state from "@/agents/sessionAgent/state";
 import * as bridgeVideoAgent from "@/agents/bridgeVideoAgent";
 import * as playableAgent from "@/agents/playableAgent";
 import * as overlayAgent from "@/agents/overlayAgent";
+import * as supervisorAgent from "@/agents/supervisorAgent";
+import * as assembler from "@/agents/assembler";
 import ResTool from "@/socket/resTool";
 
 async function verifyToken(rawToken: string): Promise<boolean> {
@@ -155,6 +157,56 @@ export default (nsp: Namespace) => {
             renderMsg.complete();
           }),
         );
+      } catch (err) {
+        msg.error(u.error(err).message);
+      }
+    });
+
+    // content:confirm —— 确定性代码，不经过 LLM。SupervisorAgent 落地前终审通过才让 Assembler 组装最终交付物
+    socket.on("content:confirm", async (data: { creativePlanId: number }) => {
+      const msg = resTool.newMessage("assistant");
+      try {
+        await state.assertContentReady(episodeId, data.creativePlanId);
+
+        const supervision = await supervisorAgent.runSupervision(data.creativePlanId);
+        const supervisionMsg = resTool.newMessage("assistant", "终审");
+        supervisionMsg.supervisorResult({
+          bridgeCutId: supervision.bridgeCutId,
+          passed: supervision.passed,
+          contentCompliance: supervision.contentCompliance,
+          brandSafety: supervision.brandSafety,
+          technicalSpec: supervision.technicalSpec,
+          issues: supervision.issues,
+          feedback: supervision.feedback,
+        });
+        supervisionMsg.complete();
+
+        if (!supervision.passed) {
+          const text = msg.text("落地终审未通过，请根据上面的问题修改内容后重新确认。");
+          text.complete();
+          msg.complete();
+          return;
+        }
+
+        const manifestId = await assembler.assemble(episodeId, data.creativePlanId, supervision);
+        await state.enterAssembling(episodeId);
+
+        const manifestRow = await u.db("ab_manifest").where("id", manifestId).first();
+        const manifestJson = JSON.parse(manifestRow?.manifestJson ?? "{}");
+        const manifestMsg = resTool.newMessage("assistant", "落地");
+        manifestMsg.manifest({
+          manifestId,
+          episodeId,
+          creativePlanId: data.creativePlanId,
+          type: manifestJson.type,
+          deliverableUrl: manifestJson.deliverable?.url,
+          ctaUrl: manifestJson.assets?.ctaUrl,
+        });
+        manifestMsg.complete();
+
+        const text = msg.text("已完成落地终审和最终组装。");
+        text.complete();
+        msg.complete();
       } catch (err) {
         msg.error(u.error(err).message);
       }

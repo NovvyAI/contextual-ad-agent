@@ -178,15 +178,23 @@ class AiText {
    * 比"提示词里要求输出 JSON 再手动 parse"更可靠——顺带拿到 Zod 校验，格式不对直接抛错，
    * 不会把脏数据写进库里。
    */
-  async invokeObject<T>(input: Omit<Parameters<typeof generateObject>[0], "model"> & { schema: import("zod").ZodType<T> }) {
+  async invokeObject<T>(
+    input: Omit<Parameters<typeof generateObject>[0], "model"> & { schema: import("zod").ZodType<T> },
+    taskRecord?: TaskRecord,
+  ) {
     const config = await getModelConfig(this.AiType);
+    const exec = async () =>
+      generateObject({
+        ...input,
+        model: await this.resolveModel(),
+        ...(config?.temperature && { temperature: config.temperature }),
+        ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
+      } as Parameters<typeof generateObject>[0]) as Promise<{ object: T } & Record<string, any>>;
 
-    return generateObject({
-      ...input,
-      model: await this.resolveModel(),
-      ...(config?.temperature && { temperature: config.temperature }),
-      ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
-    } as Parameters<typeof generateObject>[0]) as Promise<{ object: T } & Record<string, any>>;
+    if (taskRecord) {
+      return withTaskRecord(this.AiType, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
+    }
+    return exec();
   }
   async stream(input: Omit<Parameters<typeof streamText>[0], "model">) {
     const config = await getModelConfig(this.AiType);
@@ -220,7 +228,7 @@ interface ImageConfig {
   aspectRatio: `${number}:${number}`;
 }
 
-interface TaskRecord {
+export interface TaskRecord {
   taskClass: string; // 任务分类
   describe: string; // 任务描述
   relatedObjects: string; // 相关对象信息，便于后续分析和追踪

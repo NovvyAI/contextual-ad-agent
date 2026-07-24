@@ -16,6 +16,8 @@ import type {
   StoryboardCutContent,
   VideoCandidateContent,
   ContentCandidateContent,
+  SupervisorResultContent,
+  ManifestContent,
 } from "./chatMessagesData";
 
 type ContentType = AIMessageContent["type"];
@@ -237,6 +239,22 @@ class MessageBuilder {
   contentCandidate(data: ContentCandidateContent["data"]) {
     const contentId = u.uuid();
     const content: ContentCandidateContent = { type: "contentCandidate", id: contentId, data, status: "complete" };
+    this.socket.emit("content:add", { messageId: this.messageId, content });
+    return this;
+  }
+
+  // 添加落地终审结果（M4 SupervisorAgent）
+  supervisorResult(data: SupervisorResultContent["data"]) {
+    const contentId = u.uuid();
+    const content: SupervisorResultContent = { type: "supervisorResult", id: contentId, data, status: "complete" };
+    this.socket.emit("content:add", { messageId: this.messageId, content });
+    return this;
+  }
+
+  // 添加最终交付物（M4 Assembler）
+  manifest(data: ManifestContent["data"]) {
+    const contentId = u.uuid();
+    const content: ManifestContent = { type: "manifest", id: contentId, data, status: "complete" };
     this.socket.emit("content:add", { messageId: this.messageId, content });
     return this;
   }

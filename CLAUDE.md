@@ -21,7 +21,9 @@
 - ✅ **M1** — StoryboardAgent + AdLibraryAgent（批处理分析层，详见 `docs/milestones/M1.md`）
 - ✅ **M2** — SessionAgent + DirectorAgent（会话调度层 + 创意方案层，详见 `docs/milestones/M2.md`）
 - ✅ **M3** — 执行层：BridgeVideoAgent / PlayableAgent / OverlayAgent（三种桥接形式的实际生成，详见 `docs/milestones/M3.md`）
-- ⬜ **M4** — 监督与落地：SupervisorAgent 终审 + Assembler（ffmpeg 拼接 + manifest.json）—— **下一步**
+- ✅ **M4** — 监督与落地：SupervisorAgent 终审 + Assembler（详见 `docs/milestones/M4.md`）
+
+**M0-M4 是原始里程碑规划的全部内容**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证。后续如果有新的里程碑，会在这里继续更新；目前没有已排期的下一步，前端产品界面（M0 遗留的占位页面）是明确知道还没做、但不属于这个规划序列的工作。
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
