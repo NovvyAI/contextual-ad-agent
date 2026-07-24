@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Find the Pair</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+         background: linear-gradient(165deg, #ffe3ea 0%, #fff6ec 55%, #efe4ff 100%);
+         font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+  h1 { color: #c2557d; font-size: 20px; letter-spacing: .03em; }
+  #moves { color: #b58aa0; font-size: 13px; }
+  #board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+           width: min(86vw, 46vh); }
+  .card { position: relative; aspect-ratio: 1; cursor: pointer; perspective: 500px; }
+  .card .inner { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform .35s; }
+  .card.flipped .inner, .card.matched .inner { transform: rotateY(180deg); }
+  .face { position: absolute; inset: 0; border-radius: 16px; backface-visibility: hidden;
+          box-shadow: 0 4px 12px rgba(194,85,125,.18); }
+  .back { background: linear-gradient(145deg, #ffa8c0, #ff7099); display: flex; align-items: center;
+          justify-content: center; }
+  .back::after { content: "?"; color: #fff; font-size: 28px; font-weight: 700; }
+  .front { background: #fff; transform: rotateY(180deg); overflow: hidden;
+           display: flex; align-items: center; justify-content: center; }
+  .front img { width: 100%; height: 100%; object-fit: cover; }
+  .card.matched .front { outline: 3px solid #ffd166; }
+  .card.deal { animation: dealin .5s ease backwards; }
+  @keyframes dealin { from { transform: scale(.5); opacity: 0; } }
+  body.intro-active .card { animation-play-state: paused; }
+  #backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+  #backdrop img { width: 100%; height: 100%; object-fit: cover; opacity: .22;
+                  filter: blur(7px) saturate(.75) brightness(1.05); }
+  #intro { position: fixed; inset: 0; z-index: 10; background: #000; cursor: pointer;
+           transition: opacity .9s ease, filter .9s ease; }
+  #intro img { width: 100%; height: 100%; object-fit: cover;
+               animation: introzoom 3s ease forwards; }
+  @keyframes introzoom { to { transform: scale(1.06); } }
+  #intro.dissolve { opacity: 0; filter: blur(10px); pointer-events: none; }
+  .confetti { position: fixed; top: -12px; border-radius: 3px; pointer-events: none;
+              animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+</style>
+</head>
+<body>
+<h1 id="title">Find the Pair</h1>
+<div id="moves">Pairs: 0 / 8</div>
+<div id="board"></div>
+<script>
+window.GAME_MANIFEST = /*INJECT*/{}/*END*/;
+(function () {
+  var m = window.GAME_MANIFEST;
+  if (m.title) document.getElementById("title").textContent = m.title;
+  var tiles = m.tiles || [];
+
+  // Drama-frame intro: the real final frame holds, then dissolves into a
+  // soft backdrop while the board deals in. Transition lives fully in HTML5.
+  if (m.intro_frame) {
+    var backdrop = document.createElement("div");
+    backdrop.id = "backdrop";
+    backdrop.innerHTML = '<img src="' + m.intro_frame + '" alt="">';
+    document.body.appendChild(backdrop);
+
+    var intro = document.createElement("div");
+    intro.id = "intro";
+    intro.innerHTML = '<img src="' + m.intro_frame + '" alt="">';
+    document.body.appendChild(intro);
+    document.body.classList.add("intro-active");
+
+    var introAudio = m.intro_audio ? new Audio(m.intro_audio) : null;
+    if (introAudio) { try { introAudio.play(); } catch (e) {} }
+
+    var introDone = false;
+    function finishIntro() {
+      if (introDone) return;
+      introDone = true;
+      intro.classList.add("dissolve");
+      document.body.classList.remove("intro-active");
+      setTimeout(function () { intro.remove(); }, 950);
+      if (introAudio) {
+        var fade = setInterval(function () {
+          introAudio.volume = Math.max(0, introAudio.volume - 0.08);
+          if (introAudio.volume <= 0) { introAudio.pause(); clearInterval(fade); }
+        }, 180);
+      }
+    }
+    intro.addEventListener("click", finishIntro);
+    setTimeout(finishIntro, 2600);
+  }
+  var sounds = {};
+  Object.keys(m.sounds || {}).forEach(function (k) { sounds[k] = new Audio(m.sounds[k]); });
+  function play(k) { if (sounds[k]) { try { sounds[k].currentTime = 0; sounds[k].play(); } catch (e) {} } }
+
+  var deck = tiles.concat(tiles)
+    .map(function (src, i) { return { src: src, pair: i % tiles.length }; })
+    .sort(function () { return Math.random() - 0.5; });
+
+  var board = document.getElementById("board");
+  var open = [], lock = false, matched = 0;
+
+  deck.forEach(function (c, idx) {
+    var card = document.createElement("div");
+    card.className = "card deal";
+    card.style.animationDelay = (idx * 45) + "ms";
+    card.innerHTML = '<div class="inner"><div class="face back"></div>' +
+      '<div class="face front"><img src="' + c.src + '" alt=""></div></div>';
+    card.addEventListener("click", function () {
+      if (lock || card.classList.contains("flipped") || card.classList.contains("matched")) return;
+      play("tap");
+      card.classList.add("flipped");
+      open.push({ el: card, pair: c.pair });
+      if (open.length === 2) {
+        lock = true;
+        var a = open[0], b = open[1];
+        setTimeout(function () {
+          if (a.pair === b.pair) {
+            a.el.classList.add("matched"); b.el.classList.add("matched");
+            matched++;
+            play("match");
+            document.getElementById("moves").textContent = "Pairs: " + matched + " / " + tiles.length;
+            if (matched === tiles.length) win();
+          } else {
+            a.el.classList.remove("flipped"); b.el.classList.remove("flipped");
+          }
+          open = []; lock = false;
+        }, 550);
+      }
+    });
+    board.appendChild(card);
+  });
+
+  function win() {
+    play("win");
+    var colors = ["#ff7099", "#ffd166", "#9b8cff", "#7fd8a4", "#ffa8c0"];
+    for (var i = 0; i < 80; i++) {
+      var f = document.createElement("div");
+      f.className = "confetti";
+      f.style.left = Math.random() * 100 + "vw";
+      f.style.width = f.style.height = 6 + Math.random() * 8 + "px";
+      f.style.background = colors[i % colors.length];
+      f.style.animationDuration = 1.6 + Math.random() * 1.6 + "s";
+      f.style.animationDelay = Math.random() * .4 + "s";
+      document.body.appendChild(f);
+    }
+    setTimeout(function () {
+      try { parent.postMessage({ type: "game_complete" }, "*"); } catch (e) {}
+    }, 1800);
+  }
+
+  try { parent.postMessage({ type: "game_ready" }, "*"); } catch (e) {}
+})();
+</script>
+</body>
+</html>

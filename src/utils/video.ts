@@ -94,6 +94,48 @@ export async function extractAudioToWav(videoPath: string, outputWavPath: string
   await run("ffmpeg", ["-y", "-i", videoPath, "-vn", "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", outputWavPath]);
 }
 
+async function probeDims(videoPath: string): Promise<{ width: number; height: number }> {
+  await requireFfmpeg();
+  const { stdout } = await run("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", videoPath]);
+  const [width, height] = stdout.trim().split(",").map(Number);
+  return { width, height };
+}
+
+/**
+ * 拼接两段视频（如 drama tail + 桥接视频），统一按第二段的分辨率缩放+补边后拼接。
+ * 照搬 Python 参考实现 build_playable.py::concat_videos() 的 filter_complex 写法，两段都要求带音轨。
+ */
+export async function concatVideos(firstPath: string, secondPath: string, outputPath: string): Promise<void> {
+  await requireFfmpeg();
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const { width, height } = await probeDims(secondPath);
+  const norm = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`;
+  await run("ffmpeg", [
+    "-y",
+    "-i",
+    firstPath,
+    "-i",
+    secondPath,
+    "-filter_complex",
+    `[0:v]${norm}[v0];[1:v]${norm}[v1];[0:a]aresample=44100[a0];[1:a]aresample=44100[a1];[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]`,
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "20",
+    "-c:a",
+    "aac",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ]);
+}
+
 function buildScaleFilter(width?: number): string {
   return width ? `scale=${width}:-2,format=yuvj420p` : "scale=iw:ih,format=yuvj420p";
 }

@@ -24,7 +24,7 @@ export type SuggestionContent = ChatBaseContent<'suggestion', { title: string; p
 export type AttachmentContent = ChatBaseContent<'attachment', { fileType: AttachmentType; size?: number; name?: string; url?: string; isReference?: boolean; width?: number; height?: number; extension?: string; metadata?: Record<string, any> }[]>;
 export type ToolCallContent = ChatBaseContent<'toolcall', { toolCallId: string; toolCallName: string; eventType?: ToolCallEventType; parentMessageId?: string; args?: string; chunk?: string; result?: string }>;
 export type ActivityContent<T = Record<string, any>> = ChatBaseContent<'activity', { activityType: string; messageId?: string; content: T; deltaInfo?: { fromIndex: number; toIndex: number } }>;
-// M2: DirectorAgent 产出的创意方案候选卡片。storyboardCut/videoCandidate/supervisorResult 属于 M3/M4，暂不添加。
+// M2: DirectorAgent 产出的创意方案候选卡片。
 export type PlanCandidateContent = ChatBaseContent<'planCandidate', {
   id: number;
   adId: number;
@@ -36,9 +36,49 @@ export type PlanCandidateContent = ChatBaseContent<'planCandidate', {
   status: 'draft' | 'approved' | 'rejected';
   evaluatorFeedback?: { narrativeFeasibility: number; formatFit: number; adAlignment: number; feedback: string };
 }>;
+// M3: BridgeVideoAgent Stage A 分镜草案卡片（逐张 review，"只重画这一张"revise 的对象）
+export type StoryboardCutContent = ChatBaseContent<'storyboardCut', {
+  bridgeCutId: number;
+  index: number;
+  imageUrl: string;
+  prompt: string;
+  status: 'draft' | 'draftConfirmed';
+  evaluatorScore: number;
+  evaluatorFeedback?: string;
+}>;
+// M3: BridgeVideoAgent Stage B 渲染成片候选
+export type VideoCandidateContent = ChatBaseContent<'videoCandidate', {
+  bridgeCutId: number;
+  videoUrl: string;
+  durationMs: number;
+  evaluatorScore: number;
+  evaluatorFeedback?: string;
+}>;
+// M3: PlayableAgent/OverlayAgent 共用的候选卡片（互动游戏包 / CTA 卡片）
+export type ContentCandidateContent = ChatBaseContent<'contentCandidate', {
+  bridgeCutId: number;
+  type: 'playableGame' | 'ctaCard';
+  previewUrl: string;
+  ctaUrl?: string;
+  evaluatorScore: number;
+  evaluatorFeedback?: string;
+}>;
 
 // 聚合内容类型
-export type AIMessageContent = TextContent | MarkdownContent | ImageContent | ThinkingContent | SearchContent | SuggestionContent | ReasoningContent | ToolCallContent | ActivityContent | PlanCandidateContent;
+export type AIMessageContent =
+  | TextContent
+  | MarkdownContent
+  | ImageContent
+  | ThinkingContent
+  | SearchContent
+  | SuggestionContent
+  | ReasoningContent
+  | ToolCallContent
+  | ActivityContent
+  | PlanCandidateContent
+  | StoryboardCutContent
+  | VideoCandidateContent
+  | ContentCandidateContent;
 export type ReasoningContent = ChatBaseContent<'reasoning', AIMessageContent[]>;
 export type UserMessageContent = TextContent | AttachmentContent;
 

@@ -51,9 +51,13 @@ interface VendorConfig {
   inputValues: Record<string, string>;
   models: (TextModel | ImageModel | VideoModel | TTSModel)[];
 }
+type ReferenceList =
+  | { type: "image"; sourceType: "base64"; base64: string }
+  | { type: "audio"; sourceType: "base64"; base64: string }
+  | { type: "video"; sourceType: "base64"; base64: string };
 interface ImageConfig {
   prompt: string;
-  imageBase64: string[];
+  referenceList?: Extract<ReferenceList, { type: "image" }>[];
   size: "1K" | "2K" | "4K";
   aspectRatio: `${number}:${number}`;
 }
@@ -62,7 +66,7 @@ interface VideoConfig {
   resolution: string;
   aspectRatio: "16:9" | "9:16";
   prompt: string;
-  imageBase64?: string[];
+  referenceList?: ReferenceList[];
   audio?: boolean;
   mode: VideoMode[];
 }
@@ -82,6 +86,7 @@ interface PollResult {
 // 全局声明
 // ============================================================
 declare const axios: any;
+declare const FormData: any;
 declare const logger: (msg: string) => void;
 declare const jsonwebtoken: any;
 declare const zipImage: (base64: string, size: number) => Promise<string>;
@@ -131,8 +136,29 @@ const vendor: VendorConfig = {
     { name: "GPT-5.1", modelName: "gpt-5.1", type: "text", think: false },
     { name: "GPT-5.2", modelName: "gpt-5.2", type: "text", think: false },
     { name: "GPT-5.4", modelName: "gpt-5.4", type: "text", think: false },
+    { name: "GPT Image 1", modelName: "gpt-image-1", type: "image", mode: ["text", "singleImage", "multiReference"] },
   ],
 };
+// ============================================================
+// 辅助工具
+// ============================================================
+const getHeaders = () => {
+  const apiKey = vendor.inputValues.apiKey.replace(/^Bearer\s+/i, "");
+  return { Authorization: `Bearer ${apiKey}` };
+};
+
+// aspectRatio（宽:高）映射到 gpt-image-1 支持的固定尺寸档位，没有正方形/竖屏/横屏之外的选项
+function mapSize(aspectRatio: `${number}:${number}`): "1024x1024" | "1024x1536" | "1536x1024" {
+  const [w, h] = aspectRatio.split(":").map(Number);
+  if (w === h) return "1024x1024";
+  return w > h ? "1536x1024" : "1024x1536";
+}
+
+// gpt-image-1 没有"分辨率"档位，用 quality 近似映射 1K/2K/4K 的"越高越贵越细"语义
+function mapQuality(size: "1K" | "2K" | "4K"): "low" | "medium" | "high" {
+  return size === "1K" ? "low" : size === "2K" ? "medium" : "high";
+}
+
 // ============================================================
 // 适配器函数
 // ============================================================
@@ -142,7 +168,45 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
   return createOpenAI({ baseURL: vendor.inputValues.baseUrl, apiKey }).chat(model.modelName);
 };
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
-  return "";
+  if (!vendor.inputValues.apiKey) throw new Error("缺少API Key");
+  const baseUrl = vendor.inputValues.baseUrl;
+  const headers = getHeaders();
+  const size = mapSize(config.aspectRatio);
+  const quality = mapQuality(config.size);
+
+  let respJson: any;
+  if (config.referenceList && config.referenceList.length > 0) {
+    // 参考图存在：走 /images/edits，多张参考图用同名字段重复 append
+    const form = new FormData();
+    form.append("model", model.modelName);
+    form.append("prompt", config.prompt);
+    form.append("size", size);
+    form.append("quality", quality);
+    for (let i = 0; i < config.referenceList.length; i++) {
+      const b64 = config.referenceList[i].base64.replace(/^data:[^;]+;base64,/, "");
+      form.append("image[]", Buffer.from(b64, "base64"), { filename: `ref-${i}.png`, contentType: "image/png" });
+    }
+    logger(`开始提交图片编辑任务（${config.referenceList.length} 张参考图），模型：${model.modelName}`);
+    const resp = await axios.post(`${baseUrl}/images/edits`, form, { headers: { ...headers, ...form.getHeaders() } });
+    respJson = resp.data;
+  } else {
+    logger(`开始提交文生图任务，模型：${model.modelName}`);
+    const resp = await fetch(`${baseUrl}/images/generations`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: model.modelName, prompt: config.prompt, size, quality, n: 1 }),
+    });
+    if (!resp.ok) {
+      const errorReason = await resp.text();
+      throw new Error(`图片生成失败：${errorReason}`);
+    }
+    respJson = await resp.json();
+  }
+
+  const b64Json = respJson?.data?.[0]?.b64_json;
+  if (!b64Json) throw new Error(`图片生成返回异常：${JSON.stringify(respJson)}`);
+  logger(`图片生成完成`);
+  return `data:image/png;base64,${b64Json}`;
 };
 const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<string> => {
   return "";

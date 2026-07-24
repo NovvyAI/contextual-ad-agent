@@ -42,6 +42,11 @@ export default async (knex: Knex): Promise<void> => {
   if (await knex.schema.hasTable("ab_episode")) {
     await knex("ab_episode").whereNull("workflowStage").update({ workflowStage: "uploaded" });
   }
+  // M3: 执行层三个 Agent 共用 ab_generatedSegment 存生成产物。isSelected 标记同一个 (bridgeCutId, stage)
+  // 下当前生效的那一行（重生成不覆盖旧行，插入新行 + 把旧行标记为非当前，天然保留重生成历史）；
+  // stage 区分同一个 cut 下不同阶段的产物（BridgeVideoAgent 的 draftImage/finalRender，其余两个 Agent 只有 finalRender）。
+  await addColumn("ab_generatedSegment", "isSelected", "integer");
+  await addColumn("ab_generatedSegment", "stage", "text");
   void dropColumn;
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，

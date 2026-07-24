@@ -1,0 +1,201 @@
+import fs from "fs";
+import path from "path";
+import u from "@/utils";
+import { loadPlanContext } from "@/agents/shared/planContext";
+import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
+import { SYSTEM_PROMPT, buildStageADraftMessages, buildReviseMessages } from "./prompt";
+import { evaluateDraft, evaluateRender } from "./evaluator";
+
+const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
+const IMAGE_MODEL_KEY = "openai:gpt-image-1";
+const VIDEO_MODEL_KEY = "imarouter:seedance-2.0";
+const STAGE_B_DURATION_S = 6;
+
+export interface DraftCutResult {
+  bridgeCutId: number;
+  draft: StageADraft;
+  imageUrl: string;
+  evaluation: BridgeVideoEvaluation;
+}
+
+export interface RenderResult {
+  bridgeCutId: number;
+  videoUrl: string;
+  durationMs: number;
+  evaluation: BridgeVideoEvaluation;
+}
+
+function fileToBase64(absPath: string): string {
+  return fs.readFileSync(absPath).toString("base64");
+}
+
+/** Episode 结尾最后一帧：StoryboardAgent（M1）已经抽好，优先用最贴近片尾的一帧 */
+function findEpisodeLastFrame(episodeId: number): string | null {
+  const candidates = ["frame_last.jpg", "frame_near_end.jpg"].map((f) => u.getPath(["episode", String(episodeId), "frames", f]));
+  return candidates.find((p) => fs.existsSync(p)) ?? null;
+}
+
+/** 广告素材的代表性参考图：视频广告取 AdLibraryAgent（M1）抽帧里的第一张，图片广告直接用原图，文案广告没有视觉素材 */
+function findAdReferenceFrame(adId: number, adType: string | null, sourceFilePath: string | null): string | null {
+  if (adType === "image") return sourceFilePath && fs.existsSync(sourceFilePath) ? sourceFilePath : null;
+  if (adType === "video") {
+    const framesDir = u.getPath(["ad", String(adId), "frames"]);
+    if (!fs.existsSync(framesDir)) return null;
+    const files = fs
+      .readdirSync(framesDir)
+      .filter((f) => /^frame_\d+\.jpg$/.test(f))
+      .sort();
+    return files.length > 0 ? path.join(framesDir, files[0]) : null;
+  }
+  return null;
+}
+
+async function buildReferenceList(episodeId: number, adId: number): Promise<{ type: "image"; base64: string }[]> {
+  const adRow = await u.db("ab_ad").where("id", adId).first();
+  const refs: { type: "image"; base64: string }[] = [];
+  const episodeFrame = findEpisodeLastFrame(episodeId);
+  if (episodeFrame) refs.push({ type: "image", base64: fileToBase64(episodeFrame) });
+  const adFrame = findAdReferenceFrame(adId, adRow?.adType ?? null, adRow?.sourceFilePath ?? null);
+  if (adFrame) refs.push({ type: "image", base64: fileToBase64(adFrame) });
+  return refs;
+}
+
+async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, draft: StageADraft): Promise<string> {
+  const referenceList = await buildReferenceList(episodeId, adId);
+  const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
+  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run({
+    prompt: draft.prompt,
+    referenceList: referenceList.length > 0 ? referenceList : undefined,
+    size: "1K",
+    aspectRatio: "9:16",
+  });
+  await image.save(relPath);
+
+  await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").update({ isSelected: 0 });
+  await u.db("ab_generatedSegment").insert({
+    bridgeCutId,
+    model: IMAGE_MODEL_KEY,
+    filePath: relPath,
+    state: "done",
+    stage: "draftImage",
+    isSelected: 1,
+    createTime: Date.now(),
+  });
+  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(draft), prompt: draft.prompt, status: "draft" });
+
+  return u.oss.getFileUrl(relPath);
+}
+
+export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutResult> {
+  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 BridgeVideoAgent`);
+  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+
+  try {
+    const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
+      schema: stageADraftSchema,
+      system: SYSTEM_PROMPT,
+      messages: buildStageADraftMessages(episodeAnalysis, ad),
+    });
+    const evaluation = await evaluateDraft(draft);
+    const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    return { bridgeCutId, draft, imageUrl, evaluation };
+  } catch (e) {
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+    throw e;
+  }
+}
+
+export async function reviseDraftCut(bridgeCutId: number, feedback: string): Promise<DraftCutResult> {
+  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 BridgeVideoAgent`);
+  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过草案，不能 revise`);
+
+  try {
+    const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const existing = JSON.parse(cut.scriptText) as StageADraft;
+    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
+      schema: stageADraftSchema,
+      system: SYSTEM_PROMPT,
+      messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+    });
+    const evaluation = await evaluateDraft(draft);
+    const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    return { bridgeCutId, draft, imageUrl, evaluation };
+  } catch (e) {
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+    throw e;
+  }
+}
+
+/** 确定性守卫：这份方案下所有 video 类型的 cut 都要有已选定的草案图才能通过，全部通过才推进，不部分推进 */
+export async function confirmAllCuts(creativePlanId: number): Promise<void> {
+  const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "video");
+  if (cuts.length === 0) throw new Error(`创意方案 ${creativePlanId} 没有需要确认的分镜草案`);
+
+  const notReady = cuts.filter((c: any) => c.status !== "draft");
+  if (notReady.length > 0) throw new Error(`以下分镜草案还没准备好确认: ${notReady.map((c: any) => c.id).join(", ")}`);
+
+  for (const cut of cuts) {
+    const selected = await u.db("ab_generatedSegment").where("bridgeCutId", cut.id).where("stage", "draftImage").where("isSelected", 1).first();
+    if (!selected) throw new Error(`分镜草案 ${cut.id} 没有已选定的草案图`);
+  }
+
+  await u.db("ab_bridgeCut")
+    .whereIn(
+      "id",
+      cuts.map((c: any) => c.id),
+    )
+    .update({ status: "draftConfirmed" });
+}
+
+export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
+  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+  if (cut.status !== "draftConfirmed") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没确认草案，不能渲染成片`);
+  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
+
+  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+  try {
+    const draft = JSON.parse(cut.scriptText) as StageADraft;
+    const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
+    if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
+    const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+
+    const video = await u.Ai.Video(VIDEO_MODEL_KEY).run({
+      duration: STAGE_B_DURATION_S,
+      resolution: "1080p",
+      aspectRatio: "9:16",
+      prompt: draft.prompt,
+      referenceList: [{ type: "image", base64: draftImageBase64 }],
+      mode: ["singleImage"],
+    });
+    const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
+    await video.save(relPath);
+    const videoUrl = await u.oss.getFileUrl(relPath);
+    const durationMs = STAGE_B_DURATION_S * 1000;
+
+    const evaluation = await evaluateRender(draft, durationMs);
+
+    await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "finalRender").update({ isSelected: 0 });
+    await u.db("ab_generatedSegment").insert({
+      bridgeCutId,
+      model: VIDEO_MODEL_KEY,
+      filePath: relPath,
+      state: "done",
+      stage: "finalRender",
+      isSelected: 1,
+      createTime: Date.now(),
+    });
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "done", durationMs });
+
+    return { bridgeCutId, videoUrl, durationMs, evaluation };
+  } catch (e) {
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+    throw e;
+  }
+}

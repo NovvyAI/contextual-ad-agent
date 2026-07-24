@@ -10,6 +10,7 @@ import { Knex } from "knex";
 const ENV_VENDOR_MAP: { vendorId: string; apiKeyEnv: string; baseUrlEnv: string }[] = [
   { vendorId: "anthropic", apiKeyEnv: "ANTHROPIC_API_KEY", baseUrlEnv: "ANTHROPIC_BASE_URL" },
   { vendorId: "imarouter", apiKeyEnv: "IMAROUTER_API_KEY", baseUrlEnv: "IMAROUTER_BASE_URL" },
+  { vendorId: "openai", apiKeyEnv: "OPENAI_API_KEY", baseUrlEnv: "OPENAI_BASE_URL" },
 ];
 
 export default async function syncEnvVendors(knex: Knex): Promise<void> {

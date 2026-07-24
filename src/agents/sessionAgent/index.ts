@@ -6,6 +6,9 @@ import path from "path";
 import u from "@/utils";
 import ResTool from "@/socket/resTool";
 import { revisePlan } from "@/agents/directorAgent";
+import { reviseDraftCut } from "@/agents/bridgeVideoAgent";
+import { revisePlayable } from "@/agents/playableAgent";
+import { reviseOverlay } from "@/agents/overlayAgent";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -21,6 +24,11 @@ export interface AgentContext {
 const reviseInputSchema = z.object({
   planId: z.number().describe("要修改的创意方案 id"),
   feedback: z.string().describe("用户对这份方案提出的具体修改意见"),
+});
+
+const reviseCutInputSchema = z.object({
+  bridgeCutId: z.number().describe("要修改的内容 cut id"),
+  feedback: z.string().describe("用户对这份内容提出的具体修改意见"),
 });
 
 function createTools(ctx: AgentContext) {
@@ -45,14 +53,85 @@ function createTools(ctx: AgentContext) {
     },
   });
 
-  return { run_sub_agent_director_plan_revise };
+  const run_sub_agent_bridge_video_revise = tool({
+    description: "只重画桥接视频的某一张分镜草案图，其他分镜草案不受影响，仅在用户针对某个具体分镜草案提出修改意见时调用",
+    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
+    execute: async ({ bridgeCutId, feedback }) => {
+      const updated = await reviseDraftCut(bridgeCutId, feedback);
+      const cutRow = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+      const cutMsg = ctx.resTool.newMessage("assistant", "桥接视频");
+      cutMsg.storyboardCut({
+        bridgeCutId: updated.bridgeCutId,
+        index: cutRow?.index ?? 0,
+        imageUrl: updated.imageUrl,
+        prompt: updated.draft.prompt,
+        status: "draft",
+        evaluatorScore: updated.evaluation.overallScore,
+        evaluatorFeedback: updated.evaluation.feedback,
+      });
+      cutMsg.complete();
+      return `已重画分镜草案 ${bridgeCutId}，新的草案图已推送给用户查看。`;
+    },
+  });
+
+  const run_sub_agent_playable_revise = tool({
+    description: "根据用户反馈重新生成互动小游戏内容，仅在用户针对某个具体游戏 cut 提出修改意见时调用",
+    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
+    execute: async ({ bridgeCutId, feedback }) => {
+      const updated = await revisePlayable(bridgeCutId, feedback);
+      const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
+      gameMsg.contentCandidate({
+        bridgeCutId: updated.bridgeCutId,
+        type: "playableGame",
+        previewUrl: updated.previewUrl,
+        evaluatorScore: updated.evaluation.overallScore,
+        evaluatorFeedback: updated.evaluation.feedback,
+      });
+      gameMsg.complete();
+      return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，新的预览已推送给用户查看。`;
+    },
+  });
+
+  const run_sub_agent_overlay_revise = tool({
+    description: "根据用户反馈重新生成 CTA 卡片，仅在用户针对某个具体 CTA 卡片 cut 提出修改意见时调用",
+    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
+    execute: async ({ bridgeCutId, feedback }) => {
+      const updated = await reviseOverlay(bridgeCutId, feedback);
+      const cardMsg = ctx.resTool.newMessage("assistant", "CTA 卡片");
+      cardMsg.contentCandidate({
+        bridgeCutId: updated.bridgeCutId,
+        type: "ctaCard",
+        previewUrl: updated.imageUrl,
+        ctaUrl: updated.config.ctaUrl,
+        evaluatorScore: updated.evaluation.overallScore,
+        evaluatorFeedback: updated.evaluation.feedback,
+      });
+      cardMsg.complete();
+      return `已根据反馈重新生成 CTA 卡片 ${bridgeCutId}，新的预览已推送给用户查看。`;
+    },
+  });
+
+  return {
+    run_sub_agent_director_plan_revise,
+    run_sub_agent_bridge_video_revise,
+    run_sub_agent_playable_revise,
+    run_sub_agent_overlay_revise,
+  };
 }
 
 async function buildPlansContext(episodeId: number): Promise<string> {
   const plans = await u.db("ab_creativePlan").where("episodeId", episodeId).orderBy("id");
-  if (plans.length === 0) return "## 当前创意方案\n（暂无）";
-  const lines = plans.map((p: any) => `- id=${p.id} adId=${p.adId} status=${p.status} 基调=${p.tone}`);
-  return `## 当前创意方案\n${lines.join("\n")}`;
+  const planLines = plans.length
+    ? plans.map((p: any) => `- 方案 id=${p.id} adId=${p.adId} status=${p.status} 基调=${p.tone}`)
+    : ["（暂无）"];
+
+  const planIds = plans.map((p: any) => p.id);
+  const cuts = planIds.length ? await u.db("ab_bridgeCut").whereIn("creativePlanId", planIds).orderBy("id") : [];
+  const cutLines = cuts.length
+    ? cuts.map((c: any) => `- 内容 cut id=${c.id} 所属方案=${c.creativePlanId} 类型=${c.type} status=${c.status}`)
+    : ["（暂无）"];
+
+  return `## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;
 }
 
 export async function runDecisionAI(ctx: AgentContext): Promise<void> {
