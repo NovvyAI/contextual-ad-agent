@@ -113,7 +113,7 @@ declare const exports: {
 const vendor: VendorConfig = {
   id: "anthropic",
   version: "1.0",
-  author: "ad-bridge-agent",
+  author: "contextual-ad-agent",
   name: "Anthropic (Claude)",
   description: "Anthropic Claude 官方/兼容接口，可修改请求地址以指向中转代理。",
   icon: "",

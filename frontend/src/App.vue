@@ -41,7 +41,7 @@ async function runCheck() {
 
 <template>
   <main style="font-family: monospace; padding: 24px; max-width: 720px; margin: 0 auto">
-    <h1>ad-bridge-agent · M0 联通性检查</h1>
+    <h1>contextual-ad-agent · M0 联通性检查</h1>
     <p>状态：{{ status }}</p>
     <button @click="runCheck">登录并拉取供应商列表</button>
     <p v-if="error" style="color: crimson">错误：{{ error }}</p>

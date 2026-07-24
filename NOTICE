@@ -1,4 +1,4 @@
-ad-bridge-agent
+contextual-ad-agent
 Copyright 2026
 
 This project's infrastructure (Express + Socket.IO bootstrap, REST route
@@ -15,7 +15,7 @@ protocol) is derived from Toonflow-app:
 The derived files were copied from Toonflow-app and adapted for this
 project: business-specific short-drama-production logic (novel/script/
 production agents and routes, Electron desktop packaging) was removed;
-new business tables, agents, and routes specific to ad-bridge-agent's
+new business tables, agents, and routes specific to contextual-ad-agent's
 video-ad-bridging domain were added on top of the shared infrastructure.
 
 See the LICENSE file for the full text of the Apache License, Version 2.0

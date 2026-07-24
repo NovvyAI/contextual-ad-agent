@@ -175,7 +175,7 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
       },
     },
 
-    // ── ad-bridge-agent 业务表 ──
+    // ── contextual-ad-agent 业务表 ──
 
     // Episode（被分析的短剧单集）
     {

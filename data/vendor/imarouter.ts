@@ -113,7 +113,7 @@ declare const exports: {
 const vendor: VendorConfig = {
   id: "imarouter",
   version: "1.0",
-  author: "ad-bridge-agent",
+  author: "contextual-ad-agent",
   name: "ImaRouter (Seedance)",
   description: "ImaRouter 模型路由平台，视频生成接口，和 ads-gen-agent-main 使用同一个平台/同一套接口契约。",
   icon: "",

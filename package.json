@@ -1,5 +1,5 @@
 {
-  "name": "ad-bridge-agent",
+  "name": "contextual-ad-agent",
   "version": "0.1.0",
   "description": "Video ad-bridging multi-agent system: analyzes a short-drama Episode + ad assets and generates a bridge (video / playable / CTA card) appended to the episode.",
   "private": true,
