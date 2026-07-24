@@ -1,0 +1,22 @@
+ad-bridge-agent
+Copyright 2026
+
+This project's infrastructure (Express + Socket.IO bootstrap, REST route
+auto-registration, SQLite schema/migration scaffolding, the unified
+u.Ai.Text/Image/Video/Audio model-provider abstraction, the programmable
+vendor adapter system under data/vendor/, the Agent Memory (RAG) system,
+the skill-file loading mechanism, and the Socket.IO chat-message streaming
+protocol) is derived from Toonflow-app:
+
+  https://github.com/HBAI-Ltd/Toonflow-app
+  Copyright HBAI-Ltd
+  Licensed under the Apache License, Version 2.0
+
+The derived files were copied from Toonflow-app and adapted for this
+project: business-specific short-drama-production logic (novel/script/
+production agents and routes, Electron desktop packaging) was removed;
+new business tables, agents, and routes specific to ad-bridge-agent's
+video-ad-bridging domain were added on top of the shared infrastructure.
+
+See the LICENSE file for the full text of the Apache License, Version 2.0
+under which both this project and the upstream Toonflow-app are licensed.

@@ -1,0 +1,729 @@
+<title>广告桥接 Agent 架构设计</title>
+<style>
+  /* ---------- tokens ---------- */
+  :root{
+    --bg:#EFF1EA; --surface:#E4E7DD; --surface-2:#FFFFFF;
+    --text:#15201C; --text-dim:#4E594F;
+    --line:rgba(21,32,28,.16); --line-strong:rgba(21,32,28,.30);
+    --amber:#B5651A; --amber-bg:rgba(181,101,26,.11);
+    --teal:#21605C; --teal-bg:rgba(33,96,92,.11);
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Consolas,monospace;
+    --sans:-apple-system,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+    --radius:3px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#121815; --surface:#1A211D; --surface-2:#202823;
+      --text:#EAEDE6; --text-dim:#A6AEA3;
+      --line:rgba(234,237,230,.14); --line-strong:rgba(234,237,230,.28);
+      --amber:#E4954B; --amber-bg:rgba(228,149,75,.14);
+      --teal:#5FA39E; --teal-bg:rgba(95,163,158,.14);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#121815; --surface:#1A211D; --surface-2:#202823;
+    --text:#EAEDE6; --text-dim:#A6AEA3;
+    --line:rgba(234,237,230,.14); --line-strong:rgba(234,237,230,.28);
+    --amber:#E4954B; --amber-bg:rgba(228,149,75,.14);
+    --teal:#5FA39E; --teal-bg:rgba(95,163,158,.14);
+  }
+  :root[data-theme="light"]{
+    --bg:#EFF1EA; --surface:#E4E7DD; --surface-2:#FFFFFF;
+    --text:#15201C; --text-dim:#4E594F;
+    --line:rgba(21,32,28,.16); --line-strong:rgba(21,32,28,.30);
+    --amber:#B5651A; --amber-bg:rgba(181,101,26,.11);
+    --teal:#21605C; --teal-bg:rgba(33,96,92,.11);
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--sans);
+    font-size:16px; line-height:1.6; margin:0;
+    text-rendering:optimizeLegibility;
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .sheet{animation:rise .5s cubic-bezier(.2,.7,.2,1) both;}
+    @keyframes rise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  }
+  @media print{
+    .sheet{ animation:none !important; opacity:1 !important; transform:none !important; }
+    .ruler{ display:none !important; }
+    .sheet{ margin-left:auto !important; }
+  }
+  a{color:var(--amber);}
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible{
+    outline:2px solid var(--amber); outline-offset:2px;
+  }
+
+  h1,h2,h3{text-wrap:balance; font-family:var(--sans); font-weight:800; letter-spacing:-.01em; margin:0;}
+
+  /* ---------- rail (edit-suite ruler / in-page nav) ---------- */
+  .ruler{
+    position:fixed; top:0; left:0; height:100vh; width:132px;
+    display:flex; flex-direction:column; justify-content:center;
+    padding-left:28px; gap:2px; z-index:5;
+  }
+  .ruler a{
+    display:flex; align-items:baseline; gap:8px;
+    font-family:var(--mono); font-size:11px; letter-spacing:.02em;
+    color:var(--text-dim); text-decoration:none; padding:5px 0;
+    border-left:2px solid var(--line); padding-left:10px;
+    transition:color .15s ease, border-color .15s ease;
+  }
+  .ruler a:hover, .ruler a:focus-visible{ color:var(--amber); border-color:var(--amber); }
+  .ruler .tc{ font-variant-numeric:tabular-nums; opacity:.6; }
+  @media (max-width:1180px){ .ruler{display:none;} }
+
+  /* ---------- page frame ---------- */
+  .sheet{
+    max-width:840px; margin:0 auto; padding:64px 28px 96px;
+  }
+  @media (min-width:1181px){ .sheet{ margin-left:172px; margin-right:auto; max-width:820px; } }
+
+  .masthead{
+    display:flex; flex-direction:column; gap:14px;
+    padding-bottom:28px; margin-bottom:40px; border-bottom:1px solid var(--line-strong);
+  }
+  .eyebrow{
+    font-family:var(--mono); font-size:12px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--teal); display:flex; align-items:center; gap:10px;
+  }
+  .eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--teal);}
+  .masthead h1{ font-size:clamp(28px,4vw,38px); line-height:1.15; }
+  .masthead .sub{ color:var(--text-dim); font-size:17px; max-width:60ch; }
+  .meta-row{
+    display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:6px;
+    font-family:var(--mono); font-size:12.5px; color:var(--text-dim);
+  }
+  .meta-row b{ color:var(--text); font-weight:600; }
+  .revlog{
+    margin-top:6px; font-size:13px; color:var(--text-dim);
+    border-left:2px solid var(--amber); padding-left:12px;
+  }
+
+  section{ margin-bottom:56px; scroll-margin-top:24px; }
+  .kicker{
+    font-family:var(--mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--text-dim); margin-bottom:8px; display:block;
+  }
+  section > h2{ font-size:22px; margin-bottom:14px; }
+  section > p.lede{ color:var(--text-dim); max-width:65ch; margin:0 0 20px; }
+
+  .callout{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 20px; font-size:15px; color:var(--text-dim);
+  }
+  .callout b{ color:var(--text); }
+  .callout.open{ border-color:color-mix(in srgb, var(--amber) 45%, var(--line)); background:var(--amber-bg); }
+  .callout.open b{ color:var(--amber); }
+
+  /* ---------- phase strip (two-phase overview) ---------- */
+  .phase-strip{
+    display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:20px 0;
+  }
+  @media (max-width:640px){ .phase-strip{ grid-template-columns:1fr; } }
+  .phase-block{
+    border-radius:var(--radius); padding:20px 20px 18px; border:1px solid var(--line);
+    position:relative; overflow:hidden;
+  }
+  .phase-block.batch{ background:var(--teal-bg); border-color:color-mix(in srgb, var(--teal) 35%, var(--line)); }
+  .phase-block.chat{ background:var(--amber-bg); border-color:color-mix(in srgb, var(--amber) 35%, var(--line)); }
+  .phase-tag{
+    font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    display:inline-flex; align-items:center; gap:6px; margin-bottom:10px; font-weight:600;
+  }
+  .phase-block.batch .phase-tag{ color:var(--teal); }
+  .phase-block.chat .phase-tag{ color:var(--amber); }
+  .phase-block h3{ font-size:17px; margin-bottom:6px; }
+  .phase-block p{ margin:0; font-size:14.5px; color:var(--text-dim); }
+  .phase-arrow{
+    display:flex; align-items:center; justify-content:center; font-family:var(--mono);
+    color:var(--text-dim); font-size:20px; grid-column:1/-1; margin:-6px 0;
+  }
+  @media (min-width:641px){ .phase-arrow{ display:none; } }
+
+  /* ---------- roster table (call sheet) ---------- */
+  .table-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); }
+  table{ border-collapse:collapse; width:100%; min-width:760px; font-size:14.5px; }
+  thead th{
+    text-align:left; font-family:var(--mono); font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--text-dim); font-weight:600;
+    padding:10px 14px; background:var(--surface); border-bottom:1px solid var(--line-strong);
+    white-space:nowrap;
+  }
+  tbody td{ padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr:hover{ background:var(--surface); }
+  tbody tr.removed td{ text-decoration:line-through; color:var(--text-dim); opacity:.55; }
+  td.agent-name{ font-weight:700; white-space:nowrap; }
+  td.key{ font-family:var(--mono); font-size:12.5px; color:var(--text-dim); white-space:nowrap; }
+  .dept-pill{
+    display:inline-block; font-family:var(--mono); font-size:11px; letter-spacing:.04em;
+    padding:2px 8px; border-radius:2px; white-space:nowrap; font-weight:600;
+  }
+  .dept-pill.batch{ background:var(--teal-bg); color:var(--teal); }
+  .dept-pill.decision{ background:var(--amber-bg); color:var(--amber); }
+  .dept-pill.plan{ background:var(--surface-2); color:var(--teal); border:1px solid var(--teal); }
+  .dept-pill.exec{ background:var(--amber-bg); color:var(--amber); }
+  .dept-pill.supervise{ background:var(--surface-2); color:var(--text-dim); border:1px solid var(--line-strong); }
+  .dept-pill.tool{ background:var(--surface-2); color:var(--text-dim); border:1px solid var(--line); }
+  .dept-pill.land{ background:var(--surface-2); color:var(--text-dim); border:1px solid var(--line); }
+
+  /* ---------- department detail cards ---------- */
+  .dept-group{ margin-bottom:34px; }
+  .dept-head{
+    display:flex; align-items:baseline; gap:12px; margin-bottom:14px;
+    padding-bottom:8px; border-bottom:1px solid var(--line);
+  }
+  .dept-head h3{ font-size:16px; }
+  .dept-head .count{ font-family:var(--mono); font-size:12px; color:var(--text-dim); }
+  .card-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .card-grid{ grid-template-columns:1fr; } }
+  .agent-card{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px;
+  }
+  .agent-card.flagged{ border-color:color-mix(in srgb, var(--amber) 40%, var(--line)); }
+  .agent-card h4{
+    font-family:var(--mono); font-size:14px; font-weight:700; margin:0 0 4px;
+    display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;
+  }
+  .agent-card h4 .key{ font-weight:400; font-size:11.5px; }
+  .agent-card .role{ font-size:14px; color:var(--text-dim); margin:0 0 12px; }
+  .kv{ display:grid; grid-template-columns:56px 1fr; gap:4px 10px; font-size:13.5px; margin-bottom:6px; }
+  .kv dt{ font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); padding-top:2px; }
+  .kv dd{ margin:0; color:var(--text); }
+  .kv dd .tag{ font-family:var(--mono); font-size:12px; background:var(--surface); padding:1px 6px; border-radius:2px; margin:0 3px 3px 0; display:inline-block; }
+  .flag-note{
+    margin-top:10px; padding-top:10px; border-top:1px dashed var(--line-strong);
+    font-size:12.5px; color:var(--amber);
+  }
+  .flag-note b{ font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; }
+
+  /* ---------- flowchart section (pure CSS, theme-aware) ---------- */
+  .flowchart{ display:flex; flex-direction:column; }
+  .flow-phase{
+    border:1px solid var(--line); border-radius:var(--radius); padding:22px 20px 20px;
+    margin-bottom:0;
+  }
+  .flow-phase.batch{ background:var(--teal-bg); border-color:color-mix(in srgb, var(--teal) 40%, var(--line)); }
+  .flow-phase.chat{ background:var(--amber-bg); border-color:color-mix(in srgb, var(--amber) 40%, var(--line)); }
+  .flow-phase.land{ background:var(--surface); border-color:var(--line-strong); }
+  .flow-phase-title{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+    font-weight:700; margin-bottom:16px;
+  }
+  .flow-phase.batch .flow-phase-title{ color:var(--teal); }
+  .flow-phase.chat .flow-phase-title{ color:var(--amber); }
+  .flow-phase.land .flow-phase-title{ color:var(--text-dim); }
+  .flow-steps{ display:flex; flex-direction:column; align-items:center; gap:0; }
+  .flow-box{
+    background:var(--surface-2); border:1px solid var(--line-strong); border-radius:2px;
+    padding:11px 18px; font-size:13.5px; text-align:center; color:var(--text);
+    width:min(100%,440px);
+  }
+  .flow-split{ display:flex; gap:12px; justify-content:center; width:100%; flex-wrap:wrap; }
+  .flow-split .flow-box{ flex:1; min-width:180px; }
+  .flow-connector{
+    font-family:var(--mono); color:var(--text-dim); font-size:15px; line-height:1;
+    padding:6px 0; text-align:center;
+  }
+  .flow-phase-connector{
+    display:flex; justify-content:center; font-family:var(--mono); color:var(--text-dim);
+    font-size:18px; padding:6px 0;
+  }
+  .flow-decision{
+    background:var(--surface-2); border:1.5px solid var(--amber); color:var(--text);
+    clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+    padding:28px 46px; font-family:var(--mono); font-size:13px; text-align:center;
+    min-width:170px;
+  }
+  .flow-branches{ display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:12px; width:100%; }
+  .flow-branch{
+    font-family:var(--mono); font-size:12px; padding:9px 13px; border-radius:2px;
+    border:1px dashed var(--line-strong); color:var(--text-dim); text-align:left; max-width:300px;
+    background:var(--surface-2);
+  }
+  .flow-branch b{ display:block; font-size:11px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:3px; }
+  .flow-branch.no{ border-color:var(--amber); } .flow-branch.no b{ color:var(--amber); }
+  .flow-branch.yes{ border-color:var(--teal); } .flow-branch.yes b{ color:var(--teal); }
+  .flow-legend{ display:flex; flex-wrap:wrap; gap:18px; margin-top:16px; font-size:13px; color:var(--text-dim); }
+  .flow-legend span{ display:inline-flex; align-items:center; gap:7px; }
+  .swatch{ width:12px; height:12px; border-radius:2px; display:inline-block; }
+  .swatch.batch{ background:var(--teal); }
+  .swatch.plan{ background:var(--amber); }
+  .swatch.land{ background:var(--text-dim); }
+
+  /* ---------- drill-down detail diagram ---------- */
+  .flow-detail{
+    border:1px dashed var(--line-strong); border-radius:var(--radius);
+    padding:20px 20px 18px; margin-top:26px; background:var(--surface);
+  }
+  .flow-detail-title{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--text-dim); margin-bottom:16px;
+  }
+  .flow-detail-title b{ color:var(--text); }
+  .flow-detail-note{
+    text-align:center; font-family:var(--mono); font-size:11.5px; color:var(--text-dim);
+    margin-top:8px;
+  }
+
+  /* ---------- cost ladder ---------- */
+  .cost-note{ font-size:15px; color:var(--text-dim); max-width:66ch; margin:14px 0 16px; }
+  .cost-note b{ color:var(--text); }
+  table.cost-table td:nth-child(1){ font-weight:700; white-space:nowrap; }
+  table.cost-table td:nth-child(3){ font-family:var(--mono); font-size:12.5px; white-space:nowrap; }
+  .cost-bar{ display:flex; align-items:center; gap:8px; }
+  .cost-bar .track{ flex:1; height:7px; border-radius:4px; background:var(--line); min-width:60px; overflow:hidden; }
+  .cost-bar .fill{ height:100%; border-radius:4px; background:var(--amber); }
+  .cost-bar.low .fill{ background:var(--teal); }
+
+  /* ---------- patterns list ---------- */
+  .pattern{
+    padding:16px 0; border-bottom:1px solid var(--line); display:grid;
+    grid-template-columns:200px 1fr; gap:18px;
+  }
+  @media (max-width:640px){ .pattern{ grid-template-columns:1fr; gap:4px; } }
+  .pattern:last-child{ border-bottom:none; }
+  .pattern dt{ font-weight:700; font-size:14.5px; }
+  .pattern dd{ margin:0; font-size:14.5px; color:var(--text-dim); }
+
+  /* ---------- evaluator table ---------- */
+  .eval-table td, .eval-table th{ font-size:13.5px; }
+
+  /* ---------- data schema ---------- */
+  .schema-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:640px){ .schema-grid{ grid-template-columns:1fr; } }
+  .schema-card{ border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; background:var(--surface-2); }
+  .schema-card .name{ font-family:var(--mono); font-weight:700; font-size:13.5px; margin-bottom:6px; display:block; }
+  .schema-card .fields{ font-family:var(--mono); font-size:12px; color:var(--text-dim); line-height:1.7; }
+
+  /* ---------- decisions ---------- */
+  .decision-list{ display:flex; flex-direction:column; gap:12px; }
+  .decision-item{
+    padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius);
+    background:var(--surface-2);
+  }
+  .decision-item .why{ font-size:13.5px; color:var(--text-dim); margin-top:3px; }
+  .decision-item .head{ font-size:14.5px; font-weight:700; }
+
+  .openq-list{ display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+  .openq-item{
+    display:flex; gap:10px; font-size:14px; padding:12px 14px;
+    border:1px dashed color-mix(in srgb, var(--amber) 45%, var(--line)); border-radius:var(--radius);
+    background:var(--amber-bg);
+  }
+  .openq-item .mark{ font-family:var(--mono); color:var(--amber); font-weight:700; }
+
+  footer{
+    margin-top:60px; padding-top:20px; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:12px; color:var(--text-dim);
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+</style>
+
+<nav class="ruler" aria-label="章节导航">
+  <a href="#overview"><span class="tc">00:00</span> 概述</a>
+  <a href="#roster"><span class="tc">00:15</span> Agent 花名册</a>
+  <a href="#departments"><span class="tc">00:30</span> 分部门详解</a>
+  <a href="#flow"><span class="tc">00:45</span> 交互流程图</a>
+  <a href="#patterns"><span class="tc">01:00</span> 交互模式</a>
+  <a href="#data"><span class="tc">01:15</span> 数据结构</a>
+  <a href="#decisions"><span class="tc">01:30</span> 设计取舍</a>
+</nav>
+
+<main class="sheet">
+
+  <header class="masthead">
+    <span class="eyebrow"><span class="dot"></span>PRODUCTION DESIGN DOC · AD-BRIDGE AGENT SYSTEM</span>
+    <h1>广告桥接 Agent 架构设计</h1>
+    <p class="sub">输入一集短剧 Episode 与若干广告素材，系统先构思全局创意方案供用户确认，再生成桥接内容，最终在 Episode 尾部拼接输出成片。本文档定义所需的全部 Agent、职责边界与端到端交互流程。</p>
+    <div class="meta-row">
+      <span><b>状态</b> 设计评审稿 · Phase 1</span>
+      <span><b>日期</b> 2026-07-22</span>
+      <span><b>受众</b> 工程 / 产品</span>
+      <span><b>范围</b> 仅 Episode 尾插，暂不支持片中任意位置插入</span>
+    </div>
+    <p class="revlog">v0.4 相对 v0.3 的变化：<b style="color:var(--text)">原 DirectorAgent 的调度职责拆给新增的 SessionAgent</b>，DirectorAgent 收窄为纯创意规划子 Agent，方案支持图片/视频/playable 的混合形式序列；明确「前端是确定性代码，LLM 只做自然语言理解」的分层原则。</p>
+  </header>
+
+  <section id="overview">
+    <span class="kicker">01 — 概述</span>
+    <h2>Phase 1 范围：只做 Episode 尾插</h2>
+    <p class="lede">输入是一集短剧（几分钟或更短的 Episode）与若干广告素材（视频 / 图片 / 文字描述，任意组合）。插入位置由业务规则固定为 Episode 尾部，不做全片扫描与多候选位匹配。流程分两大阶段：批处理自动分析，随后进入对话式协作。</p>
+    <div class="phase-strip">
+      <div class="phase-block batch">
+        <span class="phase-tag">● 批处理阶段</span>
+        <h3>自动分析</h3>
+        <p>上传即触发，无需用户对话。产出 Episode 的结构化理解与每条广告的结构化画像。</p>
+      </div>
+      <div class="phase-arrow">↓</div>
+      <div class="phase-block chat">
+        <span class="phase-tag">● 对话阶段</span>
+        <h3>协作生成（两层）</h3>
+        <p>先谈<b>创意方案</b>（文本，成本低），确认后才进入<b>内容生成</b>（媒体，成本高），两层都支持反馈重来。</p>
+      </div>
+    </div>
+    <div class="callout">
+      <b>为什么去掉了 PlacementAgent：</b>插入位置已由业务规则固定在 Episode 尾部，不再需要一个 Agent 判断“插在哪”。这也让 <b>StoryboardAgent</b> 的产出从“全片逐镜带时间戳的分镜表”简化为“Episode 整体的结构化理解”——剧情、角色、情绪、画面、结尾状态，不再需要精细到镜头级别的切割定位。
+    </div>
+  </section>
+
+  <section id="roster">
+    <span class="kicker">02 — Agent 花名册</span>
+    <h2>全部 Agent 一览</h2>
+    <p class="lede">按「部门」分组。四个 Evaluator 分别对应四类产出，均只做预筛打分，不做自动拦截。</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>部门</th><th>Agent</th><th>Call Time</th><th>模型 Key</th><th>一句话职责</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="dept-pill batch">批处理</span></td><td class="agent-name">StoryboardAgent</td><td>上传后自动（REST）</td><td class="key">adBridge:storyboardAgent</td><td>Episode 结构化理解：剧情/角色/情绪/画面/结尾状态</td></tr>
+          <tr><td><span class="dept-pill batch">批处理</span></td><td class="agent-name">AdLibraryAgent</td><td>上传后自动（REST）</td><td class="key">adBridge:adLibraryAgent</td><td>广告素材（视频/图片/文字描述）结构化画像</td></tr>
+          <tr><td><span class="dept-pill decision">决策</span></td><td class="agent-name">SessionAgent</td><td>用户进入创作环节后，Socket 常驻会话</td><td class="key">adBridge:sessionAgent</td><td>会话状态机 + 路由用户输入，统筹调度规划/执行/监督 Agent</td></tr>
+          <tr><td><span class="dept-pill plan">规划</span></td><td class="agent-name">DirectorAgent</td><td>被 SessionAgent 当子 Agent 调用</td><td class="key">adBridge:directorAgent</td><td>构思创意方案——图片/视频/playable 的混合脚本</td></tr>
+          <tr><td><span class="dept-pill exec">执行</span></td><td class="agent-name">BridgeVideoAgent</td><td>被 SessionAgent 按已确认方案调用</td><td class="key">adBridge:bridgeVideoAgent</td><td>单向桥接视频生成/修改，先出图片分镜草案再渲染成片</td></tr>
+          <tr><td><span class="dept-pill exec">执行</span></td><td class="agent-name">PlayableAgent</td><td>被 SessionAgent 按已确认方案调用</td><td class="key">adBridge:playableAgent</td><td>H5 小游戏装配/修改</td></tr>
+          <tr><td><span class="dept-pill exec">执行</span></td><td class="agent-name">OverlayAgent</td><td>被 SessionAgent 按已确认方案调用</td><td class="key">adBridge:overlayAgent</td><td>片尾 CTA 卡片生成/修改</td></tr>
+          <tr><td><span class="dept-pill supervise">监督</span></td><td class="agent-name">SupervisorAgent</td><td>用户确认内容后，落地前强制跑一次</td><td class="key">adBridge:supervisionAgent</td><td>合规 / 品牌安全 / 技术规格终审</td></tr>
+          <tr><td><span class="dept-pill tool">工具调用</span></td><td class="agent-name">PlanEvaluator</td><td>被 DirectorAgent 内部调用</td><td class="key">adBridge:planEvaluator</td><td>评估创意方案质量，仅供参考</td></tr>
+          <tr><td><span class="dept-pill tool">工具调用</span></td><td class="agent-name">BridgeVideoEvaluator</td><td>被 BridgeVideoAgent 内部调用</td><td class="key">adBridge:bridgeVideoEvaluator</td><td>六维视频质量评分，仅供参考</td></tr>
+          <tr><td><span class="dept-pill tool">工具调用</span></td><td class="agent-name">PlayableEvaluator</td><td>被 PlayableAgent 内部调用</td><td class="key">adBridge:playableEvaluator</td><td>互动体验 + 功能完整性评分，仅供参考</td></tr>
+          <tr><td><span class="dept-pill tool">工具调用</span></td><td class="agent-name">OverlayEvaluator</td><td>被 OverlayAgent 内部调用</td><td class="key">adBridge:overlayEvaluator</td><td>位置合理性 / 遮挡 / 语义相关性评分，仅供参考</td></tr>
+          <tr><td><span class="dept-pill land">落地</span></td><td class="agent-name">Assembler</td><td>用户一键确认后（REST）</td><td class="key">— 纯代码</td><td>拼接 Episode + 确认内容，输出成片与 manifest</td></tr>
+          <tr class="removed"><td><span class="dept-pill tool">已移除</span></td><td class="agent-name">PlacementAgent</td><td>—</td><td class="key">—</td><td>插入位固定为 Episode 尾部，不再需要判断“插在哪”</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="departments">
+    <span class="kicker">03 — 分部门详解</span>
+    <h2>每个 Agent 具体做什么</h2>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>批处理部门 · 自动分析</h3><span class="count">2 个 Agent</span></div>
+      <div class="card-grid">
+        <div class="agent-card">
+          <h4>StoryboardAgent <span class="key">adBridge:storyboardAgent</span></h4>
+          <p class="role">把一集 Episode 变成结构化的整体理解，不做逐镜时间戳切割。</p>
+          <div class="kv"><dt>输入</dt><dd>当前 Episode（视频文件 / S3 URL）</dd></div>
+          <div class="kv"><dt>过程</dt><dd>全片抽帧 + 结尾密集抽帧 → 全片语音转写 → 多模态分析</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">episodeAnalysis</span> 剧情 / 角色 / 情绪基调 / 关键画面 / 结尾状态</dd></div>
+          <div class="kv"><dt>协作</dt><dd>产出被 DirectorAgent、BridgeVideoAgent 读取</dd></div>
+        </div>
+        <div class="agent-card">
+          <h4>AdLibraryAgent <span class="key">adBridge:adLibraryAgent</span></h4>
+          <p class="role">把每条广告素材变成可用于创意构思的结构化画像，视频/图片/纯文字描述平级支持。</p>
+          <div class="kv"><dt>输入</dt><dd>广告视频 / 图片 / 文字描述，可组合，可多条并行处理</dd></div>
+          <div class="kv"><dt>过程</dt><dd>视频类场景抽帧+转写；图片类直接读取；文字类直接结构化提炼</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">ads[]</span> 调性 / 商品 / 品牌安全标签 / <span class="tag">hasVisualAsset</span></dd></div>
+          <div class="kv"><dt>协作</dt><dd>产出被 DirectorAgent 用于构思创意方案</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>决策部门 · 会话调度</h3><span class="count">1 个 Agent</span></div>
+      <div class="card-grid">
+        <div class="agent-card" style="grid-column:1/-1">
+          <h4>SessionAgent <span class="key">adBridge:sessionAgent</span></h4>
+          <p class="role">唯一的 Socket chat 入口，是「状态机 + 轻量 LLM」的结合体，不做创意构思，只负责调度和意图路由。</p>
+          <div class="kv"><dt>状态机</dt><dd><span class="tag">uploaded</span> → <span class="tag">plan_review</span> → <span class="tag">content_review</span> → <span class="tag">assembling</span>，阶段流转本身是确定性代码，不经过 LLM</dd></div>
+          <div class="kv"><dt>路由</dt><dd>用户的结构化操作（确认方案/选定内容）由确定性代码直接触发调度；只有自由文字反馈才交给内部 LLM 解析意图（比如判断这句话是针对哪个候选、该转给谁）</dd></div>
+          <div class="kv"><dt>工具</dt><dd>
+            <span class="tag">run_sub_agent_director_plan_generate/_revise</span>
+            <span class="tag">run_sub_agent_bridge_video_generate/_revise</span>
+            <span class="tag">run_sub_agent_playable_generate/_revise</span>
+            <span class="tag">run_sub_agent_overlay_generate/_revise</span>
+            <span class="tag">run_supervision_agent</span>
+            <span class="tag">get_workspace</span>
+            <span class="tag">push_candidate</span>
+          </dd></div>
+          <div class="kv"><dt>协作</dt><dd>是全部规划 / 执行 / 监督层 Agent 的唯一调用方</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>规划部门 · 创意方案</h3><span class="count">1 个 Agent</span></div>
+      <div class="card-grid">
+        <div class="agent-card" style="grid-column:1/-1">
+          <h4>DirectorAgent <span class="key">adBridge:directorAgent</span></h4>
+          <p class="role">被 SessionAgent 当子 Agent 调用，专注创意构思，不做调度。产出可以是跨形式的混合脚本，不局限于单一形式。</p>
+          <div class="kv"><dt>输入</dt><dd>episodeAnalysis + ads[] + 用户对某份方案的反馈</dd></div>
+          <div class="kv"><dt>过程</dt><dd>针对每条候选广告构思一份方案（文本，可能是「桥接视频 + playable」这类组合脚本，不是必须只选一种形式）→ 内部调用 PlanEvaluator 打分</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">creativePlans[]</span> 含 <span class="tag">formatSequence[]</span>（组合形式序列）+ 叙事构想 + 参考分</dd></div>
+          <div class="kv"><dt>协作</dt><dd>产出交回 SessionAgent，由其推给用户、按确认结果调度执行 Agent</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>执行部门 · 内容生成</h3><span class="count">3 个 Agent，均含 generate / revise 双入口</span></div>
+      <div class="card-grid">
+        <div class="agent-card">
+          <h4>BridgeVideoAgent <span class="key">adBridge:bridgeVideoAgent</span></h4>
+          <p class="role">生成单向桥接视频：从 Episode 结尾状态过渡到广告开场。内部分两阶段——先出便宜的图片分镜草案锁定细节，再渲染贵的成片。</p>
+          <div class="kv"><dt>输入</dt><dd>Episode 结尾参考片段 + 已确认方案 + 广告素材</dd></div>
+          <div class="kv"><dt>过程</dt><dd>Stage A 生成分镜草案（图片，逐张 review）→ 全部确认后 Stage B 以这些 cut 作参考帧渲染成片</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">bridgeCuts[]</span> 分镜草案图 · <span class="tag">bridgeCandidates[]</span> 视频预览 + 六维参考分</dd></div>
+          <div class="flag-note"><b>展开</b> 完整两阶段交互流程见 04 节「BridgeVideoAgent 内部展开」；尾插场景下取消了“广告 → 下一分镜”的回程桥接，只做单向。</div>
+        </div>
+        <div class="agent-card">
+          <h4>PlayableAgent <span class="key">adBridge:playableAgent</span></h4>
+          <p class="role">把片头 + 互动小游戏 + CTA 装配成可玩广告包。</p>
+          <div class="kv"><dt>输入</dt><dd>已确认方案 + 广告素材（H5 包 / 品牌图标 / 文字）</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">playableBundle</span> 可预览的完整互动包</dd></div>
+        </div>
+        <div class="agent-card flagged">
+          <h4>OverlayAgent <span class="key">adBridge:overlayAgent</span></h4>
+          <p class="role">生成片尾 CTA 卡片：商品图/文案 + 跳转按钮。</p>
+          <div class="kv"><dt>输入</dt><dd>已确认方案 + 广告商品信息</dd></div>
+          <div class="kv"><dt>输出</dt><dd><span class="tag">ctaCard</span> 静态卡片 + 跳转链接</dd></div>
+          <div class="flag-note"><b>待确认</b> 目前理解是尾插场景下“内嵌链接”退化为片尾静态 CTA 卡片，而非片中悬浮热点。若产品仍需要叠加型热点形态，需重新确认，会影响下方 OverlayEvaluator 的评估维度。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>监督部门 · 质量与合规</h3><span class="count">1 个 Agent</span></div>
+      <div class="card-grid">
+        <div class="agent-card" style="grid-column:1/-1">
+          <h4>SupervisorAgent <span class="key">adBridge:supervisionAgent</span></h4>
+          <p class="role">落地前终审，范围比多插入位场景收窄——不再需要检查时间轴重叠或插入频率，因为全片只有一个固定插入位。</p>
+          <div class="kv"><dt>检查</dt><dd>内容合规、品牌安全、输出技术规格</dd></div>
+          <div class="kv"><dt>不通过</dt><dd>打回 SessionAgent，指定环节需要重新生成或更换方案</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>工具调用部门 · 四个 Evaluator</h3><span class="count">均为内部调用，不暴露给 SessionAgent</span></div>
+      <div class="table-wrap">
+        <table class="eval-table">
+          <thead><tr><th>Evaluator</th><th>被谁调用</th><th>评估维度</th></tr></thead>
+          <tbody>
+            <tr><td class="agent-name">PlanEvaluator</td><td>DirectorAgent</td><td>创意方案质量：叙事衔接可行性 / 形式选择合理性 / 与广告诉求匹配度</td></tr>
+            <tr><td class="agent-name">BridgeVideoEvaluator</td><td>BridgeVideoAgent</td><td>叙事连续性 / 视觉一致性 / 转场自然度 / 情绪曲线 / 广告融合度 / 音频连续性</td></tr>
+            <tr><td class="agent-name">PlayableEvaluator</td><td>PlayableAgent</td><td>互动体验 / 功能完整性</td></tr>
+            <tr><td class="agent-name">OverlayEvaluator</td><td>OverlayAgent</td><td>位置合理性 / 遮挡情况 / 语义相关性</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="lede" style="margin-top:12px;">统一原则：<b style="color:var(--text)">四个 Evaluator 都只做预筛、只出参考分，即便是“游戏资源没加载全”这类客观问题，也只标警告不做自动拦截</b>——终审权全程留给用户。</p>
+    </div>
+
+    <div class="dept-group">
+      <div class="dept-head"><h3>落地层</h3><span class="count">非 LLM</span></div>
+      <div class="card-grid">
+        <div class="agent-card" style="grid-column:1/-1">
+          <h4>Assembler <span style="font-family:var(--mono);font-size:11.5px;color:var(--text-dim);">纯代码，非 LLM</span></h4>
+          <p class="role">按用户最终确认的内容做拼接：桥接视频 / 小游戏片头物理拼进 Episode 尾部，CTA 卡片作为片尾静态附加内容，输出成片与 manifest。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="flow">
+    <span class="kicker">04 — 用户交互流程与 Agent 调用</span>
+    <h2>从上传到一键生成</h2>
+    <p class="lede">对话阶段实际是两层独立的“候选 → 反馈 → 确认”循环：先在方案层用文字反复打磨（便宜），确认后才进入内容层做真正的媒体生成（贵）。</p>
+
+    <div class="callout" style="margin-bottom:22px;">
+      <b>架构分层：</b>前端（Vue3+TS，确定性组件渲染）↕ SessionAgent（状态机 + 轻量 LLM，只做意图路由）↕ 子 Agent 群（DirectorAgent / BridgeVideoAgent / PlayableAgent / OverlayAgent / SupervisorAgent，纯 LLM 创意与生成工作）。判断某个环节该不该用 LLM 的标准很简单：<b>如果能写成 if/switch，就不用 LLM</b>——按钮点击类的结构化操作（确认方案、选定内容）由确定性代码直接处理；只有自由文字反馈才需要 LLM 做意图解析。
+    </div>
+
+    <div class="flowchart">
+
+      <div class="flow-phase batch">
+        <div class="flow-phase-title">① 批处理阶段 · 自动 · REST</div>
+        <div class="flow-steps">
+          <div class="flow-box">用户上传 Episode + 广告素材</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-split">
+            <div class="flow-box">StoryboardAgent<br>分析 Episode</div>
+            <div class="flow-box">AdLibraryAgent<br>分析每条广告</div>
+          </div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">前端展示 Episode 概览 + 广告列表</div>
+        </div>
+      </div>
+
+      <div class="flow-phase-connector">↓</div>
+
+      <div class="flow-phase chat">
+        <div class="flow-phase-title">② 方案环节 · 对话，成本低</div>
+        <div class="flow-steps">
+          <div class="flow-box">SessionAgent 调用 DirectorAgent 构思 N 份创意方案（混合脚本）</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">DirectorAgent 内部调用 PlanEvaluator 预筛打分</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">方案候选卡片推给用户</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-decision">用户满意方案？</div>
+          <div class="flow-branches">
+            <div class="flow-branch no"><b>否</b>反馈修改某一份 → SessionAgent 路由回 DirectorAgent 重新构思</div>
+            <div class="flow-branch yes"><b>是</b>确认一份方案 → 进入 ③ 内容环节</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-phase-connector">↓</div>
+
+      <div class="flow-phase chat">
+        <div class="flow-phase-title">③ 内容环节 · 对话，成本高</div>
+        <div class="flow-steps">
+          <div class="flow-box">SessionAgent 按已确认方案的形式序列派发执行 Agent</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">BridgeVideoAgent / PlayableAgent / OverlayAgent 生成候选</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">对应 Evaluator 预筛打分</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">内容候选卡片推给用户</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-decision">用户满意内容？</div>
+          <div class="flow-branches">
+            <div class="flow-branch no"><b>否</b>反馈局部修改 → 回到「生成候选」</div>
+            <div class="flow-branch yes"><b>是</b>确认内容 → 进入 ④ 落地</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-phase-connector">↓</div>
+
+      <div class="flow-phase land">
+        <div class="flow-phase-title">④ 落地 · REST</div>
+        <div class="flow-steps">
+          <div class="flow-box">SupervisorAgent 落地前终审</div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-decision">通过？</div>
+          <div class="flow-branches">
+            <div class="flow-branch no"><b>否</b>打回 ③「SessionAgent 按已确认方案的形式序列派发执行 Agent」</div>
+            <div class="flow-branch yes"><b>是</b>继续</div>
+          </div>
+          <div class="flow-connector">↓</div>
+          <div class="flow-box">Assembler 拼接输出成片 + manifest</div>
+        </div>
+      </div>
+
+    </div>
+    <div class="flow-legend">
+      <span><span class="swatch batch"></span>批处理，无需用户等待介入</span>
+      <span><span class="swatch plan"></span>对话协作，用户持续参与</span>
+      <span><span class="swatch land"></span>落地环节，一次性动作</span>
+    </div>
+
+    <div class="flow-detail">
+      <div class="flow-detail-title">展开 · <b>BridgeVideoAgent</b> 内部两阶段（只有这个 Agent 需要这层展开——PlayableAgent 的装配、OverlayAgent 的静态卡片本身就够便宜，不需要先出草案）</div>
+      <div class="flow-steps">
+        <div class="flow-box">Stage A · 生成分镜草案（图片，若干张 cut）</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-box">用户逐张 review 每个 cut</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-decision">全部 cut 都确认？</div>
+        <div class="flow-branches">
+          <div class="flow-branch no"><b>否</b>反馈修改某一张 cut → 只重画这一张，不影响其他 cut</div>
+          <div class="flow-branch yes"><b>是</b>进入 Stage B</div>
+        </div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-box">Stage B · 以已确认的 cut 作参考帧渲染成片</div>
+        <div class="flow-connector">↓</div>
+        <div class="flow-box">BridgeVideoEvaluator 预筛打分</div>
+      </div>
+      <div class="flow-detail-note">↳ 汇入主流程「内容候选卡片推给用户」，之后与 ③ 内容环节共用同一套满意度确认逻辑</div>
+    </div>
+
+    <h3 style="font-size:16px;margin:34px 0 6px;">为什么要分“贵”和“便宜”</h3>
+    <p class="cost-note">“便宜”指生成快、算力低，改一次几乎不心疼；“贵”指生成慢、算力高，改一次要重新等待和付出算力成本。核心原则：<b>越贵的阶段越不该用来试错</b>——能在便宜阶段发现的问题（构图、表情、转场设想），都应该在便宜阶段解决掉；贵的阶段只用来验证“已经锁定的方案渲染出来对不对”，而不是用来“边生成边摸索创意”。这也是为什么整条链路是「文字方案 → 图片草案 → 视频成片」一层比一层贵。</p>
+    <div class="table-wrap">
+      <table class="cost-table">
+        <thead><tr><th>阶段</th><th>产出</th><th>典型耗时</th><th>相对成本</th><th>Review 方式</th><th>出错重来的代价</th></tr></thead>
+        <tbody>
+          <tr><td>创意方案</td><td>文字</td><td>秒级</td><td><div class="cost-bar low"><div class="track"><div class="fill" style="width:12%"></div></div></div></td><td>整体看一遍</td><td>几乎零成本——改几句文字重新生成</td></tr>
+          <tr><td>分镜草案</td><td>图片，每张一个 cut</td><td>数秒 ~ 十余秒/张</td><td><div class="cost-bar low"><div class="track"><div class="fill" style="width:38%"></div></div></div></td><td>逐张仔细看</td><td>低——只重画出问题的那一张</td></tr>
+          <tr><td>成片渲染</td><td>视频</td><td>数十秒 ~ 数分钟</td><td><div class="cost-bar"><div class="track"><div class="fill" style="width:100%"></div></div></div></td><td>整体确认（细节已在草案阶段锁定）</td><td>高——整段重新渲染，时间和算力成本最大</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="patterns">
+    <span class="kicker">05 — 关键交互模式</span>
+    <h2>支撑上述流程的几个约定</h2>
+    <div class="pattern"><dt>成本分层迭代</dt><dd>不止方案层/内容层两层——BridgeVideoAgent 内部还要再插一层图片草案，把细粒度修改压到成本最低的阶段。原则和数据见 04 节。</dd></div>
+    <div class="pattern"><dt>两层候选循环</dt><dd>方案层（文本、便宜）与内容层（媒体、贵）是两个独立的“候选卡片 → 反馈 → 确认”循环，同一套交互模式在不同颗粒度上复用，但不能跳过方案层直接生成媒体内容。</dd></div>
+    <div class="pattern"><dt>generate / revise 双入口</dt><dd>每个执行 Agent 都提供两个入口而非一个通用「修改 Agent」：三种形式的修改方式完全不同，拆到各自 Agent 里更贴合实现。</dd></div>
+    <div class="pattern"><dt>Evaluator 按产出类型拆分</dt><dd>不用一个通用评分器套用所有内容——文本方案、视频、游戏、卡片的质量维度完全不同，各自的 Evaluator 只服务于对应的产出方。</dd></div>
+    <div class="pattern"><dt>Evaluator 只做预筛</dt><dd>所有评分都只是给用户看的参考信息，不做自动通过/拒绝，客观问题也只标警告，终审权全程留给用户。</dd></div>
+    <div class="pattern"><dt>单向参考驱动生成</dt><dd>桥接视频的连续性靠真实抽取的 Episode 结尾画面片段驱动生成，不是只靠文字 prompt 去猜测。</dd></div>
+  </section>
+
+  <section id="data">
+    <span class="kicker">06 — 数据结构一览</span>
+    <h2>贯穿全流程的五张核心数据</h2>
+    <div class="schema-grid">
+      <div class="schema-card"><span class="name">episodeAnalysis</span><div class="fields">plot · characters[] · emotionArc<br>keyVisuals[] · endingState</div></div>
+      <div class="schema-card"><span class="name">ads[]</span><div class="fields">id · sourceType(video/image/text) · tone<br>product · brandSafety · hasVisualAsset</div></div>
+      <div class="schema-card"><span class="name">creativePlans[]</span><div class="fields">id · adId · formatSequence[] · narrative · tone<br>planEvaluatorScore · status</div></div>
+      <div class="schema-card"><span class="name">bridgeCuts[]</span><div class="fields">planId · cutIndex · imageUrl<br>description · status(草案/已确认)</div></div>
+      <div class="schema-card"><span class="name">generatedSegments[]</span><div class="fields">planId · format · versionHistory[]<br>currentCandidateId · evaluatorScore</div></div>
+      <div class="schema-card"><span class="name">manifest</span><div class="fields">confirmedPlanId · finalSegmentId<br>supervisorResult · outputPath</div></div>
+    </div>
+  </section>
+
+  <section id="decisions">
+    <span class="kicker">07 — 关键设计取舍</span>
+    <h2>为什么这么设计</h2>
+    <div class="decision-list">
+      <div class="decision-item">
+        <div class="head">Phase 1 只做尾插，移除 PlacementAgent</div>
+        <div class="why">插入位置由业务规则固定在 Episode 尾部，判断“插在哪”这件事不再存在，去掉相应 Agent 与全片分镜扫描能显著降低批处理成本和复杂度。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">方案先行，执行后随</div>
+        <div class="why">DirectorAgent 先用文字构思创意方案交给用户确认，SessionAgent 再据此调度真正的媒体生成，把试错成本压在便宜的文本迭代阶段，避免反复生成贵的视频/游戏内容。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">桥接改为单向</div>
+        <div class="why">尾插场景下广告后面没有视频需要接回去，双向桥接的“回程”部分不再有意义，直接砍掉降低生成成本。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">Evaluator 一拆四，且统一只做预筛</div>
+        <div class="why">不同产出类型（文本方案/视频/游戏/卡片）需要完全不同的评估维度，不能共用一套标准；同时无论维度是主观还是客观，都不做自动拦截，避免和用户判断冲突。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">BridgeVideoAgent 内部再插一层图片草案</div>
+        <div class="why">视频渲染是全流程里最贵的一步，不该承担“边生成边试错”的成本。插入一层便宜的图片分镜草案，把构图/表情/转场这类细粒度问题挡在便宜阶段，贵的阶段只做最终确认，减少整段重新渲染的次数。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">SessionAgent 与 DirectorAgent 拆分</div>
+        <div class="why">“会话调度”和“创意构思”是两种性质完全不同的工作——前者以确定性状态机为主、只在解析自由文字时才用到 LLM；后者是纯创造性任务。混在一个 Agent 里职责过重，拆开后 DirectorAgent 可以像其他执行 Agent 一样被 SessionAgent 统一当作子 Agent 工具调用，架构更一致。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">创意方案支持混合形式序列，不再是单选一种形式</div>
+        <div class="why">广告桥接不一定只用一种形式最合适——DirectorAgent 的方案现在可以指定多种形式的组合（比如桥接视频接一个 playable），更贴近真实创意需求，但也意味着 SessionAgent 的调度逻辑和 Assembler 的拼接逻辑都要能处理“一个插入位对应一段组合内容”。</div>
+      </div>
+      <div class="decision-item">
+        <div class="head">前端是确定性代码，LLM 只做自然语言理解</div>
+        <div class="why">LLM 输出不确定，不能负责决定何时展示什么 UI；候选卡片、分镜图、视频预览的渲染逻辑必须和内容生成解耦，否则没法维护。判断标准：能写成 if/switch 的（状态机流转、按钮点击路由、并发调度）都是确定性代码；只有解析自由文字反馈的意图才交给 LLM。这层协议直接扩展 Toonflow 现有的 <code>ResTool</code> 内容类型（<code>content:add</code>/<code>content:update</code>），新增 <code>planCandidate</code>/<code>storyboardCut</code>/<code>videoCandidate</code>/<code>supervisorResult</code> 几个 type，不另起一套事件系统。</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:36px;font-size:18px;">待确认事项</h2>
+    <div class="openq-list">
+      <div class="openq-item"><span class="mark">?</span><span><b>OverlayAgent 的最终形态</b>——当前理解是片尾静态 CTA 卡片，而非片中悬浮热点。如果产品仍需要叠加型热点，OverlayEvaluator 的“遮挡情况”维度需要重新定义适用场景。</span></div>
+      <div class="openq-item"><span class="mark">?</span><span><b>是否要支持桥接到下一集开头</b>——本版按“广告后无需接回视频”设计单向桥接；如果后续要做系列剧“追更”场景（广告后接下一集片头），BridgeVideoAgent 需要恢复双向能力。</span></div>
+      <div class="openq-item"><span class="mark">?</span><span><b>混合形式序列的执行顺序</b>——一份方案指定「桥接视频 + playable」这类组合时，SessionAgent 派发对应执行 Agent 是并行生成、还是必须按序（比如先出视频再出 playable，因为后者可能要衔接前者的画面）？这个影响调度逻辑，需要确认。</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>广告桥接 Agent 架构设计 · v0.4 · Phase 1（Episode 尾插）</span>
+    <span>批处理层（青）→ 方案 / 内容协作层（琥珀）→ 落地</span>
+  </footer>
+
+</main>
