@@ -12,12 +12,12 @@ const route = useRoute();
 const episodeId = computed(() => Number(route.params.id));
 const store = computed(() => useSessionAgentStore(episodeId.value));
 
-const ads = ref<{ id: number; name: string }[]>([]);
+const ads = ref<{ id: number; name: string; summary: string }[]>([]);
 
 async function loadAds() {
-  // getAdList 只返回已分析的广告（DirectorAgent 消费用的 ads[] 形状，id 是字符串）
+  // getAdList 只返回已分析的广告（DirectorAgent 消费用的 ads[] 形状，id 是字符串，name 是额外补的展示字段）
   const res = (await http.post("/api/ad/getAdList")) as any;
-  ads.value = res.data.map((a: any) => ({ id: Number(a.id), name: a.summary?.slice(0, 20) ?? `广告 ${a.id}` }));
+  ads.value = res.data.map((a: any) => ({ id: Number(a.id), name: a.name ?? `广告 ${a.id}`, summary: a.summary ?? "" }));
 }
 
 // 每次助手消息生成完成（不管是确定性操作的响应，还是自由文字 revise 的响应），都重新拉一次

@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 广告选择下拉框显示真实名称 + 悬浮显示完整摘要
+
+**用户意见**：会话页"选择要参与创意方案的广告素材"下拉框里显示的名字应该是广告素材的名称，不是别的；光标移到某个选项上，要在旁边显示这条广告的完整内容摘要。
+
+**改了什么**：排查发现下拉框显示的名字之前一直是 AI 分析结果里 `summary` 字段的前 20 个字（`getAdList` 只返回分析结果 `AdEntry`，没带 `ab_ad` 表自己的 `name` 字段），不是创建广告时填的名称。`src/routes/ad/getAdList.ts` 现在额外查出 `name` 字段拼进返回结果（`AdEntry` 本身形状不变，`directorAgent/index.ts` 走的是直接查 `ab_ad`，不消费这个接口，加字段不影响它）；`frontend/src/views/SessionView.vue` 的 `loadAds()` 改用 `a.name` 做下拉框标签，同时保留 `summary` 字段；`ActionBar.vue` 给每个 `t-option` 加 `:title="ad.summary"`，用浏览器原生 title 提示悬浮展示完整摘要。
+
+**验证**：真实浏览器打开下拉框，选项名称变成真实广告名称（"Lumira Radiance Serum"/"Nova Brew Cold Brew Coffee"等，不再是截断的摘要句子）；用 JS 读取 DOM 确认每个选项的 `title` 属性都带着完整摘要文本。`npx tsc --noEmit`/`npx vue-tsc -b --force` 均通过。
+
+---
+
 ## 2026-07-25 Episode 创建表单必填校验
 
 **用户意见**：标题、服务器本地文件路径两个框都加个 `*` 表示必填；不填就点创建要给必填提示；路径填的文件不存在，点创建也要给提示。
