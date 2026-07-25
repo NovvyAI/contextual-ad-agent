@@ -138,7 +138,31 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
   if (!vendor.inputValues.apiKey) throw new Error("缺少API Key");
   const apiKey = vendor.inputValues.apiKey.replace(/^Bearer\s+/i, "");
   const baseURL = vendor.inputValues.baseUrl || undefined;
-  return createAnthropic({ apiKey, baseURL }).chat(model.modelName);
+  // 中转商代理某些请求会不稳定地忽略 thinking:disabled，返回缺 signature 字段的 thinking 内容块，
+  // 触发 @ai-sdk/anthropic 的严格 Zod 校验报 "Invalid JSON response"（详见 src/utils/ai.ts 里的说明）。
+  // 请求侧关闭扩展思考不能保证每次都生效，这里在响应侧兜底：缺 signature 就补一个占位值，不影响
+  // 我们实际要用的 tool_use/text 内容。
+  const patchMissingThinkingSignatureFetch = async (url: any, init: any) => {
+    const res = await fetch(url, init);
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("json")) return res;
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      let changed = false;
+      if (Array.isArray(data?.content)) {
+        for (const block of data.content) {
+          if (block && block.type === "thinking" && typeof block.signature !== "string") {
+            block.signature = "relay-missing-signature";
+            changed = true;
+          }
+        }
+      }
+      if (changed) return new Response(JSON.stringify(data), { status: res.status, statusText: res.statusText, headers: res.headers });
+    } catch (e) {}
+    return new Response(text, { status: res.status, statusText: res.statusText, headers: res.headers });
+  };
+  return createAnthropic({ apiKey, baseURL, fetch: patchMissingThinkingSignatureFetch as any }).chat(model.modelName);
 };
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   return "";

@@ -23,8 +23,9 @@
 - ✅ **M3** — 执行层：BridgeVideoAgent / PlayableAgent / OverlayAgent（三种桥接形式的实际生成，详见 `docs/milestones/M3.md`）
 - ✅ **M4** — 监督与落地：SupervisorAgent 终审 + Assembler（详见 `docs/milestones/M4.md`）
 - ✅ **M5** — 前端：Vue3+TDesign+Pinia 界面，端到端跑通完整链路（详见 `docs/milestones/M5.md`）
+- ✅ **M6** — 联调与验收：用 AI 生成的虚构真实感素材（不是技术测试图案）真实跑通完整案例，补上分阶段耗时统计，修复两个模型调用层兼容性 bug（详见 `docs/milestones/M6.md`）
 
-**M0-M4 是原始里程碑规划的全部内容**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证。M5 是规划之外但一直明确知道要做的追加里程碑，把这条链路从"只能靠 smoketest/curl 操作"补上了一个真正能用的浏览器界面。后续如果有新的里程碑，会在这里继续更新；目前没有已排期的下一步。
+**M0-M6 是原始 work-plan 规划的全部里程碑**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证，M5（浏览器界面）是规划之外但一直明确知道要做的追加里程碑，M6 补上了"用真实感素材验收"这最后一环。后续如果有新的里程碑，会在这里继续更新；目前没有已排期的下一步。
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
@@ -34,7 +35,7 @@
 - **模型 key 暂时是字面量字符串**，如 `"anthropic:claude-opus-4-8"`、`"imarouter:seedance-2.0"`，还没有走 `o_agentDeploy` 正式部署配置——那是 M2 SessionAgent/DirectorAgent 设计出真正 Agent key 分类体系之后的事，现在不用纠结这个"临时"写法。
 - **`.env` 是密钥的唯一入口**：`cp .env.example .env` 后自己填真实值，应用启动时 `src/lib/syncEnvVendors.ts` 自动把 `.env` 里配置的 key 同步进 `o_vendorConfig` 数据库并启用对应供应商，改完 `.env` 重启一下服务就生效，不用每次手写 curl 调 `updateVendorInputs`。
 - **`scripts/smoketest/` 是验证约定**：每新写一个能力，配一个独立可以直接 `npx tsx scripts/smoketest/xxx.ts` 跑的验证脚本，真实调用外部服务（不是 mock），M0/M1 全程都是这么验证的，建议后续里程碑继续保持这个习惯——比空谈"应该没问题"可靠得多。
-- **`data/test-assets/`** 下已经有现成测试素材：`sample.wav`（真人语音，用 macOS `say` 命令合成的）、`sample-episode.mp4`（12 秒合成测试视频，SMPTE 测试图案 + 上面那段语音）。做新 Agent 的验证优先复用这些，不用每次现造。
+- **`data/test-assets/`** 下已经有现成测试素材：`sample.wav`（真人语音，用 macOS `say` 命令合成的）、`sample-episode.mp4`（12 秒合成测试视频，SMPTE 测试图案 + 上面那段语音，终审面对这份素材永远会诚实判定不通过）。做新 Agent 的验证优先复用这些，不用每次现造。`m6-episode.mp4`/`m6-ad-*.jpg` 是 M6 新生成的、更接近真实观感的虚构素材（AI 生成的插画风格短剧片段 + 三个虚构广告品牌），需要验证终审在有真实叙事内容素材上的表现时用这套，见 `docs/milestones/M6.md`。
 
 ## 技术栈速查
 

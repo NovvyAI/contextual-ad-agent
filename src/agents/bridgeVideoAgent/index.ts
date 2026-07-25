@@ -63,12 +63,15 @@ async function buildReferenceList(episodeId: number, adId: number): Promise<{ ty
 async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, draft: StageADraft): Promise<string> {
   const referenceList = await buildReferenceList(episodeId, adId);
   const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
-  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run({
-    prompt: draft.prompt,
-    referenceList: referenceList.length > 0 ? referenceList : undefined,
-    size: "1K",
-    aspectRatio: "9:16",
-  });
+  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+    {
+      prompt: draft.prompt,
+      referenceList: referenceList.length > 0 ? referenceList : undefined,
+      size: "1K",
+      aspectRatio: "9:16",
+    },
+    { taskClass: "bridgeVideo-stageA-draftImage", describe: `Cut ${bridgeCutId} 分镜草案图`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+  );
   await image.save(relPath);
 
   await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").update({ isSelected: 0 });
@@ -94,11 +97,14 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
 
   try {
     const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
-    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: stageADraftSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildStageADraftMessages(episodeAnalysis, ad),
-    });
+    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: stageADraftSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildStageADraftMessages(episodeAnalysis, ad),
+      },
+      { taskClass: "bridgeVideo-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     const evaluation = await evaluateDraft(draft);
     const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
     return { bridgeCutId, draft, imageUrl, evaluation };
@@ -118,11 +124,14 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
   try {
     const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
     const existing = JSON.parse(cut.scriptText) as StageADraft;
-    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: stageADraftSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
-    });
+    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: stageADraftSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+      },
+      { taskClass: "bridgeVideo-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     const evaluation = await evaluateDraft(draft);
     const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
     return { bridgeCutId, draft, imageUrl, evaluation };
@@ -165,15 +174,21 @@ export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
     const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
     if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
     const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+    const plan = await u.db("ab_creativePlan").where("id", cut.creativePlanId).first();
+    if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
+    const episodeId = plan.episodeId;
 
-    const video = await u.Ai.Video(VIDEO_MODEL_KEY).run({
-      duration: STAGE_B_DURATION_S,
-      resolution: "1080p",
-      aspectRatio: "9:16",
-      prompt: draft.prompt,
-      referenceList: [{ type: "image", base64: draftImageBase64 }],
-      mode: ["singleImage"],
-    });
+    const video = await u.Ai.Video(VIDEO_MODEL_KEY).run(
+      {
+        duration: STAGE_B_DURATION_S,
+        resolution: "1080p",
+        aspectRatio: "9:16",
+        prompt: draft.prompt,
+        referenceList: [{ type: "image", base64: draftImageBase64 }],
+        mode: ["singleImage"],
+      },
+      { taskClass: "bridgeVideo-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
     await video.save(relPath);
     const videoUrl = await u.oss.getFileUrl(relPath);

@@ -47,6 +47,8 @@ export default async (knex: Knex): Promise<void> => {
   // stage 区分同一个 cut 下不同阶段的产物（BridgeVideoAgent 的 draftImage/finalRender，其余两个 Agent 只有 finalRender）。
   await addColumn("ab_generatedSegment", "isSelected", "integer");
   await addColumn("ab_generatedSegment", "stage", "text");
+  // M6: 联调验收阶段要做分阶段耗时统计，o_tasks 补一列毫秒级耗时（taskRecord.ts 的 done() 里写入）
+  await addColumn("o_tasks", "durationMs", "integer");
   void dropColumn;
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，

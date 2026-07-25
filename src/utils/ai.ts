@@ -142,6 +142,17 @@ async function urlToBase64(url: string, retries = 3, delay = 1000): Promise<stri
   }
   throw new Error("urlToBase64 failed");
 }
+// M6 发现，两个中转商特有的兼容性问题，都靠 providerOptions.anthropic 规避：
+// 1. 扩展思考（extended thinking）默认开启时，中转商返回的 thinking 内容块缺官方应有的 signature
+//    字段，@ai-sdk/anthropic 的严格 Zod 校验直接判定整个响应 "Invalid JSON response"——关掉扩展思考规避。
+// 2. generateObject 默认走 Anthropic 较新的原生结构化输出（output_config.format:json_schema），
+//    这个中转商没能正确支持/转发这个较新 API 面，返回内容解析不出来，同样报 "Invalid JSON response"——
+//    强制退回旧式的工具调用（tool-calling）方式做结构化输出，兼容性更好，这条路径已经用 curl 直接验证过可行。
+// 调用方如显式传了自己的 providerOptions 会覆盖这两个默认值。
+const DEFAULT_ANTHROPIC_PROVIDER_OPTIONS = {
+  anthropic: { thinking: { type: "disabled" as const }, structuredOutputMode: "jsonTool" as const },
+};
+
 class AiText {
   private AiType: AiType | `${string}:${string}`;
   private think?: boolean;
@@ -167,6 +178,7 @@ class AiText {
 
     return generateText({
       ...(input.tools && { stopWhen: stepCountIs(Object.keys(input.tools).length * 50) }),
+      providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
       ...input,
       model: await this.resolveModel(),
       ...(config?.temperature && { temperature: config.temperature }),
@@ -185,6 +197,7 @@ class AiText {
     const config = await getModelConfig(this.AiType);
     const exec = async () =>
       generateObject({
+        providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
         ...input,
         model: await this.resolveModel(),
         ...(config?.temperature && { temperature: config.temperature }),
@@ -201,6 +214,7 @@ class AiText {
 
     return streamText({
       ...(input.tools && { stopWhen: stepCountIs(Object.keys(input.tools).length * 50) }),
+      providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
       ...input,
       model: await this.resolveModel(extractReasoningMiddleware({ tagName: "reasoning_content", separator: "\n" })),
       ...(config?.temperature && { temperature: config.temperature }),

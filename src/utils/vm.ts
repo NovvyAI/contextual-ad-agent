@@ -34,6 +34,7 @@ export default function runCode(code: string, vendor?: Record<string, any>) {
     mergeImages,
     pollTask,
     fetch: fetch,
+    Response: Response,
     exports,
     axios,
     FormData,

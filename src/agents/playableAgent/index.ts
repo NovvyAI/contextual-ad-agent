@@ -32,7 +32,10 @@ async function assemble(bridgeCutId: number, episodeId: number, config: Playable
   const tileUrls: string[] = [];
   for (let i = 0; i < config.tilePrompts.length; i++) {
     const relPath = `${relDir}/game/assets/tiles/tile_src_${i}.png`;
-    const image = await u.Ai.Image(IMAGE_MODEL_KEY).run({ prompt: config.tilePrompts[i], size: "1K", aspectRatio: "1:1" });
+    const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+      { prompt: config.tilePrompts[i], size: "1K", aspectRatio: "1:1" },
+      { taskClass: "playable-tileImage", describe: `Cut ${bridgeCutId} 配对素材图 ${i}`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     await image.save(relPath);
     tileUrls.push(await u.oss.getFileUrl(relPath));
   }
@@ -83,11 +86,14 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
 
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
-    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: playableConfigSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildGenerateMessages(episodeAnalysis, ad),
-    });
+    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: playableConfigSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildGenerateMessages(episodeAnalysis, ad),
+      },
+      { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     const evaluation = await evaluatePlayable(config);
     const previewUrl = await assemble(bridgeCutId, episodeId, config, evaluation);
     return { bridgeCutId, config, previewUrl, evaluation };
@@ -106,11 +112,14 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
     const existing = JSON.parse(cut.scriptText) as PlayableConfig;
-    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: playableConfigSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
-    });
+    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: playableConfigSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+      },
+      { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
     const evaluation = await evaluatePlayable(config);
     const previewUrl = await assemble(bridgeCutId, episodeId, config, evaluation);
     return { bridgeCutId, config, previewUrl, evaluation };

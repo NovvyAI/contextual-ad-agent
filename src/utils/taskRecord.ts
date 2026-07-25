@@ -38,6 +38,7 @@ export default async function taskRecord(
     }
   }
 
+  const startTime = Date.now();
   const [id] = await db("o_tasks").insert({
     projectId,
     taskClass,
@@ -45,7 +46,7 @@ export default async function taskRecord(
     model: modelName,
     describe,
     state: taskStateMap[0],
-    startTime: Date.now(),
+    startTime,
   });
 
   /** 任务成功时调用 done(1)，失败时调用 done(-1, '原因') */
@@ -54,6 +55,7 @@ export default async function taskRecord(
       .where("id", id)
       .update({
         state: taskStateMap[state],
+        durationMs: Date.now() - startTime,
         reason: state === -1 ? (reason ?? "") : null,
       });
   };

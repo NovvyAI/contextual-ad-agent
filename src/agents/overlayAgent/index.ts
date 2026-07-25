@@ -13,22 +13,28 @@ export interface OverlayResult {
   evaluation: OverlayEvaluation;
 }
 
-async function evaluate(config: OverlayConfig): Promise<OverlayEvaluation> {
-  const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-    schema: overlayEvaluationSchema,
-    system: SYSTEM_PROMPT,
-    messages: buildEvaluationMessages(config),
-  });
+async function evaluate(bridgeCutId: number, episodeId: number, config: OverlayConfig): Promise<OverlayEvaluation> {
+  const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+    {
+      schema: overlayEvaluationSchema,
+      system: SYSTEM_PROMPT,
+      messages: buildEvaluationMessages(config),
+    },
+    { taskClass: "overlay-evaluate", describe: `Cut ${bridgeCutId} CTA 卡片评估`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+  );
   return object;
 }
 
-async function renderAndPersist(bridgeCutId: number, config: OverlayConfig, evaluation: OverlayEvaluation): Promise<string> {
+async function renderAndPersist(bridgeCutId: number, episodeId: number, config: OverlayConfig, evaluation: OverlayEvaluation): Promise<string> {
   const relPath = `bridgeCut/${bridgeCutId}/overlay-${Date.now()}.png`;
-  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run({
-    prompt: config.productImagePrompt,
-    size: "1K",
-    aspectRatio: "1:1",
-  });
+  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+    {
+      prompt: config.productImagePrompt,
+      size: "1K",
+      aspectRatio: "1:1",
+    },
+    { taskClass: "overlay-productImage", describe: `Cut ${bridgeCutId} CTA 卡片产品图`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+  );
   await image.save(relPath);
   const imageUrl = await u.oss.getFileUrl(relPath);
 
@@ -53,14 +59,17 @@ export async function generateOverlay(bridgeCutId: number): Promise<OverlayResul
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   try {
-    const { episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
-    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: overlayConfigSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildGenerateMessages(episodeAnalysis, ad),
-    });
-    const evaluation = await evaluate(config);
-    const imageUrl = await renderAndPersist(bridgeCutId, config, evaluation);
+    const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: overlayConfigSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildGenerateMessages(episodeAnalysis, ad),
+      },
+      { taskClass: "overlay-generateText", describe: `Cut ${bridgeCutId} CTA 卡片配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
+    const evaluation = await evaluate(bridgeCutId, episodeId, config);
+    const imageUrl = await renderAndPersist(bridgeCutId, episodeId, config, evaluation);
     return { bridgeCutId, config, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -75,15 +84,18 @@ export async function reviseOverlay(bridgeCutId: number, feedback: string): Prom
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
 
   try {
-    const { episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
     const existing = JSON.parse(cut.scriptText) as OverlayConfig;
-    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject({
-      schema: overlayConfigSchema,
-      system: SYSTEM_PROMPT,
-      messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
-    });
-    const evaluation = await evaluate(config);
-    const imageUrl = await renderAndPersist(bridgeCutId, config, evaluation);
+    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+      {
+        schema: overlayConfigSchema,
+        system: SYSTEM_PROMPT,
+        messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+      },
+      { taskClass: "overlay-reviseText", describe: `Cut ${bridgeCutId} CTA 卡片配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    );
+    const evaluation = await evaluate(bridgeCutId, episodeId, config);
+    const imageUrl = await renderAndPersist(bridgeCutId, episodeId, config, evaluation);
     return { bridgeCutId, config, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
