@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import http from "@/utils/http";
+import LocalFilePicker from "@/components/common/LocalFilePicker.vue";
 
 interface AdRow {
   id: number;
@@ -115,7 +116,10 @@ onUnmounted(() => {
           </t-select>
           <t-input v-model="newBrandName" placeholder="品牌名（可选）" />
         </t-space>
-        <t-input v-if="newAdType !== 'text'" v-model="newSourceFilePath" placeholder="服务器本地文件路径" />
+        <t-space v-if="newAdType !== 'text'">
+          <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+          <LocalFilePicker @uploaded="(p) => (newSourceFilePath = p)" />
+        </t-space>
         <t-textarea v-else v-model="newTextContent" placeholder="广告文案" />
         <t-button theme="primary" :loading="creating" @click="handleCreate">创建</t-button>
       </t-space>

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { MessagePlugin } from "tdesign-vue-next";
 import http from "@/utils/http";
+import LocalFilePicker from "@/components/common/LocalFilePicker.vue";
 
 interface EpisodeRow {
   id: number;
@@ -115,7 +116,10 @@ onUnmounted(() => {
           <div style="font-size: 12px; color: var(--td-text-color-secondary, #666); margin-bottom: 4px">
             服务器本地文件路径<span style="color: var(--td-error-color, #d54941)">*</span>
           </div>
-          <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+          <t-space>
+            <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+            <LocalFilePicker @uploaded="(p) => (newSourceFilePath = p)" />
+          </t-space>
         </div>
         <t-button theme="primary" :loading="creating" @click="handleCreate">创建</t-button>
       </t-space>

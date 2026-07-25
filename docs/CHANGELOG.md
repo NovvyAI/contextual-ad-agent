@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 服务器本地文件路径加"选择本地文件"上传弹窗
+
+**用户意见**：`/#/episodes` 和 `/#/ads` 页面的"服务器本地文件路径"输入框旁边加一个能从电脑本地选文件的弹窗功能。
+
+**改了什么**：浏览器出于安全限制不会把 `<input type="file">` 选中文件的真实绝对路径暴露给页面 JS，所以做不到"选完直接读到服务器路径"——唯一可行的方式是真的把文件传上去。新增后端路由 `src/routes/upload/uploadFile.ts`（用 `multer` 处理 multipart 上传，落到 `data/uploads/` 下，文件名前缀时间戳防重名，返回一个可以直接填进 `sourceFilePath` 的相对路径）；新增依赖 `multer`/`@types/multer`；`data/uploads/` 加进 `.gitignore`（用户上传的文件不进仓库）。前端新增可复用组件 `frontend/src/components/common/LocalFilePicker.vue`（隐藏的 `<input type="file">` + "选择本地文件"按钮，选中后自动上传并把返回路径填回文本框），`EpisodeListView.vue`/`AdListView.vue` 都在路径输入框旁边加了这个组件。
+
+**验证**：原生文件选择弹窗是浏览器标准行为，没有再单独验证；重点验证了上传接口本身——用 curl 真实上传一张图片，确认文件正确落到 `data/uploads/` 下（用 `file` 命令验证是合法图片、大小和原文件一致），再用返回的路径真实调 `createAd` 建了一条广告，验证全链路走得通，最后清理掉测试数据。`npx tsc --noEmit`/`npx vue-tsc -b --force` 均通过。
+
+---
+
 ## 2026-07-25 Episode/广告列表加删除按钮
 
 **用户意见**：`/#/episodes` 和 `/#/ads` 页面里每一项都要加一个删除按钮。

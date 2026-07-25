@@ -17,6 +17,7 @@ declare module 'vue' {
     ContentCandidateCard: typeof import('./components/chat/content/ContentCandidateCard.vue')['default']
     EpisodeAnalysisPanel: typeof import('./components/session/EpisodeAnalysisPanel.vue')['default']
     GenericContent: typeof import('./components/chat/content/GenericContent.vue')['default']
+    LocalFilePicker: typeof import('./components/common/LocalFilePicker.vue')['default']
     ManifestCard: typeof import('./components/chat/content/ManifestCard.vue')['default']
     MarkdownContent: typeof import('./components/chat/content/MarkdownContent.vue')['default']
     MessageList: typeof import('./components/chat/MessageList.vue')['default']
