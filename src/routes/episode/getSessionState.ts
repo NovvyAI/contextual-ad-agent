@@ -75,6 +75,7 @@ export default router.post(
           workflowStage: episode.workflowStage,
           durationMs: episode.durationMs,
           createTime: episode.createTime,
+          episodeAnalysis: episode.episodeAnalysis ? JSON.parse(episode.episodeAnalysis) : null,
         },
         creativePlans,
         bridgeCuts,

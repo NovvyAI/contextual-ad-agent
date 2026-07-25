@@ -6,6 +6,7 @@ import useSessionAgentStore from "@/stores/sessionAgent";
 import MessageList from "@/components/chat/MessageList.vue";
 import ChatInput from "@/components/chat/ChatInput.vue";
 import ActionBar from "@/components/chat/ActionBar.vue";
+import EpisodeAnalysisPanel from "@/components/session/EpisodeAnalysisPanel.vue";
 
 const route = useRoute();
 const episodeId = computed(() => Number(route.params.id));
@@ -49,6 +50,8 @@ function handleSend(text: string) {
       <t-tag variant="light" style="margin-left: 8px">{{ store.sessionState?.episode.workflowStage }}</t-tag>
       <t-tag v-if="!store.connected" theme="warning" variant="light" style="margin-left: 8px">未连接</t-tag>
     </div>
+
+    <EpisodeAnalysisPanel v-if="store.sessionState?.episode.episodeAnalysis" :analysis="store.sessionState.episode.episodeAnalysis" />
 
     <MessageList v-if="store.sessionState" :messages="store.messages" :episode-id="episodeId" />
 

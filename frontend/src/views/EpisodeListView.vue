@@ -30,7 +30,18 @@ async function loadEpisodes() {
 }
 
 async function handleCreate() {
-  if (!newTitle.value || !newSourceFilePath.value) return;
+  if (!newTitle.value.trim() && !newSourceFilePath.value.trim()) {
+    MessagePlugin.warning("请填写标题和服务器本地文件路径");
+    return;
+  }
+  if (!newTitle.value.trim()) {
+    MessagePlugin.warning("请填写标题");
+    return;
+  }
+  if (!newSourceFilePath.value.trim()) {
+    MessagePlugin.warning("请填写服务器本地文件路径");
+    return;
+  }
   creating.value = true;
   try {
     await http.post("/api/episode/createEpisode", { title: newTitle.value, sourceFilePath: newSourceFilePath.value });
@@ -83,9 +94,19 @@ onUnmounted(() => {
 <template>
   <div style="padding: 24px; max-width: 960px; margin: 0 auto">
     <t-card title="新建 Episode" style="margin-bottom: 24px">
-      <t-space>
-        <t-input v-model="newTitle" placeholder="标题" />
-        <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+      <t-space align="end">
+        <div>
+          <div style="font-size: 12px; color: var(--td-text-color-secondary, #666); margin-bottom: 4px">
+            标题<span style="color: var(--td-error-color, #d54941)">*</span>
+          </div>
+          <t-input v-model="newTitle" placeholder="标题" />
+        </div>
+        <div>
+          <div style="font-size: 12px; color: var(--td-text-color-secondary, #666); margin-bottom: 4px">
+            服务器本地文件路径<span style="color: var(--td-error-color, #d54941)">*</span>
+          </div>
+          <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+        </div>
         <t-button theme="primary" :loading="creating" @click="handleCreate">创建</t-button>
       </t-space>
     </t-card>

@@ -5,8 +5,24 @@ import { defineStore } from "pinia";
 import http from "@/utils/http";
 import { useChat } from "@/composables/useChat";
 
+export interface EpisodeAnalysis {
+  plot: string;
+  characters: { name: string; description: string; role: "protagonist" | "antagonist" | "supporting" }[];
+  emotionArc: { timestampS: number; emotion: string; description?: string }[];
+  keyVisuals: { timestampS: number; description: string; importance?: "high" | "medium" | "low" }[];
+  endingState: { summary: string; cliffhanger: boolean; lastVisualDescription: string; suggestedTone: string };
+}
+
 export interface SessionState {
-  episode: { id: number; title: string; status: string; workflowStage: string; durationMs: number | null; createTime: number | null };
+  episode: {
+    id: number;
+    title: string;
+    status: string;
+    workflowStage: string;
+    durationMs: number | null;
+    createTime: number | null;
+    episodeAnalysis: EpisodeAnalysis | null;
+  };
   creativePlans: {
     id: number;
     adId: number;

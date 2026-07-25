@@ -15,6 +15,7 @@ declare module 'vue' {
     AppHeader: typeof import('./components/layout/AppHeader.vue')['default']
     ChatInput: typeof import('./components/chat/ChatInput.vue')['default']
     ContentCandidateCard: typeof import('./components/chat/content/ContentCandidateCard.vue')['default']
+    EpisodeAnalysisPanel: typeof import('./components/session/EpisodeAnalysisPanel.vue')['default']
     GenericContent: typeof import('./components/chat/content/GenericContent.vue')['default']
     ManifestCard: typeof import('./components/chat/content/ManifestCard.vue')['default']
     MarkdownContent: typeof import('./components/chat/content/MarkdownContent.vue')['default']
