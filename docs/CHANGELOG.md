@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 修复 bridgeCut:confirm 静默吞掉 Stage B 渲染失败
+
+**触发原因**：用户反馈"已确认全部分镜草案，开始渲染成片"一直卡在"内容生成中..."。排查发现不是真的卡住——Seedance 已经真实失败了两次（各耗时 30~40 秒），报错是 `InputImageSensitiveContentDetected.PrivacyInformation`（判定分镜草案图"可能包含真人"，拒绝拿它做图生视频，供应商内容安全限制，不是服务故障）。但 `bridgeCut:confirm` 这个 socket 处理器和 M6 修复前的 `bridgeCut:generate` 犯了同一个错——`Promise.allSettled` 的结果从没被检查过，Stage B 失败后前端完全收不到任何消息，界面永远卡在"生成中"，用户既不知道失败了、也没法重试。
+
+**改了什么**：`src/socket/routes/sessionAgent.ts`——① `bridgeCut:confirm` 现在检查 `allSettled` 结果，Stage B 失败会记日志并推 `error` 消息给用户；② `bridgeCut:retry` 增加判断：如果是 video 类型的 cut、且已经有确认过的分镜草案图（说明失败发生在 Stage B），重试时只重跑 `renderStageB`（成片渲染），不会重新走 Stage A 覆盖掉已确认的草案（原来的逻辑会不分青红皂白地调 `generateCutContent`，对 video 类型等于重新生成草案，需要用户重新确认一遍分镜，语义不对）。
+
+**验证**：写了个临时 socket 脚本直接对真实卡住的 cut（id 18）触发 `bridgeCut:retry`，确认：只重跑了 Stage B（没有产生新的 Stage A 草案）；这次失败被正确推送成 `message:update {status:"error", ...}` 而不是静默消失。这条 cut 背后的图片本身会被 Seedance 稳定拒绝（不是瞬时抖动），所以重试预期还会失败，需要重新生成一版不同的分镜草案图才能绕过去——但这属于内容问题，不是这次要修的代码 bug。`npx tsc --noEmit`/`npx vue-tsc -b --force` 均通过。
+
+---
+
 ## 2026-07-25 服务器本地文件路径加"选择本地文件"上传弹窗
 
 **用户意见**：`/#/episodes` 和 `/#/ads` 页面的"服务器本地文件路径"输入框旁边加一个能从电脑本地选文件的弹窗功能。

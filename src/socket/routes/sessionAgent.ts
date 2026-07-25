@@ -148,7 +148,29 @@ export default (nsp: Namespace) => {
         const cut = await u.db("ab_bridgeCut").where("id", data.bridgeCutId).first();
         if (!cut) throw new Error(`bridgeCut ${data.bridgeCutId} 不存在`);
         if (cut.status !== "failed") throw new Error(`bridgeCut ${data.bridgeCutId} 当前状态为 ${cut.status}，不是 failed，无法重试`);
-        await generateCutContent({ id: data.bridgeCutId, index: cut.index!, type: cut.type! });
+
+        // video 类型如果已经有确认过的分镜草案图，说明失败发生在 Stage B（成片渲染），只重试 Stage B——
+        // 不能直接走 generateCutContent（会重新跑 Stage A，覆盖已确认的草案，还得让用户重新确认一遍分镜）
+        const confirmedDraft =
+          cut.type === "video"
+            ? await u.db("ab_generatedSegment").where("bridgeCutId", data.bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first()
+            : null;
+
+        if (confirmedDraft) {
+          await u.db("ab_bridgeCut").where("id", data.bridgeCutId).update({ status: "draftConfirmed" });
+          const result = await bridgeVideoAgent.renderStageB(data.bridgeCutId);
+          const msg = resTool.newMessage("assistant", "桥接视频");
+          msg.videoCandidate({
+            bridgeCutId: data.bridgeCutId,
+            videoUrl: result.videoUrl,
+            durationMs: result.durationMs,
+            evaluatorScore: result.evaluation.overallScore,
+            evaluatorFeedback: result.evaluation.feedback,
+          });
+          msg.complete();
+        } else {
+          await generateCutContent({ id: data.bridgeCutId, index: cut.index!, type: cut.type! });
+        }
       } catch (err) {
         const msg = resTool.newMessage("assistant");
         msg.error(u.error(err).message);
@@ -165,7 +187,7 @@ export default (nsp: Namespace) => {
         msg.complete();
 
         const videoCuts = await u.db("ab_bridgeCut").where("creativePlanId", data.creativePlanId).where("type", "video");
-        await Promise.allSettled(
+        const results = await Promise.allSettled(
           videoCuts.map(async (cut: any) => {
             const result = await bridgeVideoAgent.renderStageB(cut.id);
             const renderMsg = resTool.newMessage("assistant", "桥接视频");
@@ -179,6 +201,15 @@ export default (nsp: Namespace) => {
             renderMsg.complete();
           }),
         );
+        // 同 bridgeCut:generate 的教训：allSettled 不会抛错，Stage B 渲染失败必须显式记日志+推给用户，
+        // 否则前端会一直卡在"内容生成中..."，既不知道失败了也没法重试
+        results.forEach((result, i) => {
+          if (result.status !== "rejected") return;
+          const cut = videoCuts[i];
+          console.error(`[sessionAgent] bridgeCut ${cut.id} 成片渲染失败:`, u.error(result.reason).message);
+          const errMsg = resTool.newMessage("assistant");
+          errMsg.error(`cut ${cut.id}（成片渲染）失败：${u.error(result.reason).message}，可点击重试`);
+        });
       } catch (err) {
         msg.error(u.error(err).message);
       }
