@@ -32,6 +32,7 @@ declare module 'vue' {
     TInput: typeof import('tdesign-vue-next')['Input']
     TLink: typeof import('tdesign-vue-next')['Link']
     TOption: typeof import('tdesign-vue-next')['Option']
+    TPopconfirm: typeof import('tdesign-vue-next')['Popconfirm']
     TSelect: typeof import('tdesign-vue-next')['Select']
     TSpace: typeof import('tdesign-vue-next')['Space']
     TTable: typeof import('tdesign-vue-next')['Table']

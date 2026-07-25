@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 Episode/广告列表加删除按钮
+
+**用户意见**：`/#/episodes` 和 `/#/ads` 页面里每一项都要加一个删除按钮。
+
+**改了什么**：新增 `src/routes/episode/deleteEpisode.ts` 和 `src/routes/ad/deleteAd.ts` 两个后端路由，级联删除关联的 `ab_creativePlan`/`ab_bridgeCut`/`ab_generatedSegment`/`ab_manifest`（只删数据库记录，不动 `sourceFilePath` 指向的原始文件——那是用户机器上的文件，不归这个 App 管）。前端 `EpisodeListView.vue`/`AdListView.vue` 各加一个"删除"按钮，用 `t-popconfirm` 包一层二次确认（"关联的创意方案/内容也会一起删除"），确认后调用删除接口并刷新列表。
+
+**验证**：真实浏览器分别删除一条广告和一个 Episode，列表正确刷新掉对应行；直接查数据库确认级联删除生效（`ab_episode`/`ab_ad`/`ab_creativePlan` 相关行都清空了）。`npx tsc --noEmit`/`npx vue-tsc -b --force` 均通过。
+
+---
+
 ## 2026-07-25 广告选择下拉框显示真实名称 + 悬浮显示完整摘要
 
 **用户意见**：会话页"选择要参与创意方案的广告素材"下拉框里显示的名字应该是广告素材的名称，不是别的；光标移到某个选项上，要在旁边显示这条广告的完整内容摘要。

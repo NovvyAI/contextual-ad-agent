@@ -75,6 +75,16 @@ async function handleAnalyze(episodeId: number) {
   pollUntilSettled();
 }
 
+async function handleDelete(episodeId: number) {
+  try {
+    await http.post("/api/episode/deleteEpisode", { episodeId });
+    MessagePlugin.success("已删除");
+    await loadEpisodes();
+  } catch (e: any) {
+    MessagePlugin.error(e?.message ?? "删除失败");
+  }
+}
+
 const statusTheme: Record<string, "default" | "success" | "danger" | "warning"> = {
   uploaded: "default",
   analyzing: "warning",
@@ -115,7 +125,7 @@ onUnmounted(() => {
       { colKey: 'id', title: 'ID', width: 60 },
       { colKey: 'title', title: '标题' },
       { colKey: 'status', title: '状态' },
-      { colKey: 'op', title: '操作', width: 220 },
+      { colKey: 'op', title: '操作', width: 280 },
     ]">
       <template #status="{ row }">
         <t-tag :theme="statusTheme[row.status] ?? 'default'" variant="light">{{ row.status }}</t-tag>
@@ -124,6 +134,9 @@ onUnmounted(() => {
         <t-space>
           <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
           <t-button v-if="row.status === 'analyzed'" size="small" theme="primary" @click="router.push(`/episodes/${row.id}`)">进入会话</t-button>
+          <t-popconfirm content="确定删除这个 Episode 吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
+            <t-button size="small" theme="danger" variant="outline">删除</t-button>
+          </t-popconfirm>
         </t-space>
       </template>
     </t-table>

@@ -76,6 +76,16 @@ async function handleAnalyze(adId: number) {
   pollUntilSettled();
 }
 
+async function handleDelete(adId: number) {
+  try {
+    await http.post("/api/ad/deleteAd", { adId });
+    MessagePlugin.success("已删除");
+    await loadAds();
+  } catch (e: any) {
+    MessagePlugin.error(e?.message ?? "删除失败");
+  }
+}
+
 const statusTheme: Record<string, "default" | "success" | "danger" | "warning"> = {
   uploaded: "default",
   analyzing: "warning",
@@ -116,13 +126,18 @@ onUnmounted(() => {
       { colKey: 'name', title: '名称' },
       { colKey: 'adType', title: '类型', width: 100 },
       { colKey: 'status', title: '状态' },
-      { colKey: 'op', title: '操作', width: 140 },
+      { colKey: 'op', title: '操作', width: 200 },
     ]">
       <template #status="{ row }">
         <t-tag :theme="statusTheme[row.status] ?? 'default'" variant="light">{{ row.status }}</t-tag>
       </template>
       <template #op="{ row }">
-        <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
+        <t-space>
+          <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
+          <t-popconfirm content="确定删除这条广告素材吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
+            <t-button size="small" theme="danger" variant="outline">删除</t-button>
+          </t-popconfirm>
+        </t-space>
       </template>
     </t-table>
   </div>
