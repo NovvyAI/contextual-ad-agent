@@ -22,8 +22,9 @@
 - ✅ **M2** — SessionAgent + DirectorAgent（会话调度层 + 创意方案层，详见 `docs/milestones/M2.md`）
 - ✅ **M3** — 执行层：BridgeVideoAgent / PlayableAgent / OverlayAgent（三种桥接形式的实际生成，详见 `docs/milestones/M3.md`）
 - ✅ **M4** — 监督与落地：SupervisorAgent 终审 + Assembler（详见 `docs/milestones/M4.md`）
+- ✅ **M5** — 前端：Vue3+TDesign+Pinia 界面，端到端跑通完整链路（详见 `docs/milestones/M5.md`）
 
-**M0-M4 是原始里程碑规划的全部内容**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证。后续如果有新的里程碑，会在这里继续更新；目前没有已排期的下一步，前端产品界面（M0 遗留的占位页面）是明确知道还没做、但不属于这个规划序列的工作。
+**M0-M4 是原始里程碑规划的全部内容**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证。M5 是规划之外但一直明确知道要做的追加里程碑，把这条链路从"只能靠 smoketest/curl 操作"补上了一个真正能用的浏览器界面。后续如果有新的里程碑，会在这里继续更新；目前没有已排期的下一步。
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
@@ -37,7 +38,7 @@
 
 ## 技术栈速查
 
-TypeScript 全栈。后端 Express 5 + Socket.IO + SQLite（better-sqlite3 + knex）+ Vercel AI SDK（`ai` 包）。模型调用统一走 `src/utils/ai.ts` 的 `u.Ai.Text/Image/Video/Audio`，具体供应商适配脚本在 `data/vendor/*.ts`（运行时用 sucrase 转译 + VM 沙箱执行，改供应商脚本不用重新编译整个应用）。前端 Vue3 + TypeScript + Vite，目前只有一个验证连通性的占位页面，不是产品界面。
+TypeScript 全栈。后端 Express 5 + Socket.IO + SQLite（better-sqlite3 + knex）+ Vercel AI SDK（`ai` 包）。模型调用统一走 `src/utils/ai.ts` 的 `u.Ai.Text/Image/Video/Audio`，具体供应商适配脚本在 `data/vendor/*.ts`（运行时用 sucrase 转译 + VM 沙箱执行，改供应商脚本不用重新编译整个应用）。前端 Vue3 + TypeScript + Vite，`frontend/` 独立子工程（`tdesign-vue-next` 组件库 + Pinia + `vue-router` + `socket.io-client`），M5 起是真正的产品界面，详见 `docs/milestones/M5.md`。
 
 ## 本机环境注意
 

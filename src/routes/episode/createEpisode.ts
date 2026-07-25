@@ -22,6 +22,7 @@ export default router.post(
       title,
       sourceFilePath,
       status: "uploaded",
+      workflowStage: "uploaded",
       createTime: Date.now(),
     });
     return res.status(200).send(success({ id }));

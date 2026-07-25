@@ -1,0 +1,108 @@
+<script setup lang="ts">
+import { ref, onMounted } from "vue";
+import { MessagePlugin } from "tdesign-vue-next";
+import http from "@/utils/http";
+
+interface AdRow {
+  id: number;
+  name: string;
+  adType: "video" | "image" | "text";
+  status: string;
+  brandName: string | null;
+  createTime: number;
+}
+
+const ads = ref<AdRow[]>([]);
+const loading = ref(false);
+const creating = ref(false);
+
+const newName = ref("");
+const newAdType = ref<"video" | "image" | "text">("image");
+const newSourceFilePath = ref("");
+const newTextContent = ref("");
+const newBrandName = ref("");
+
+async function loadAds() {
+  loading.value = true;
+  try {
+    const res = (await http.post("/api/ad/getAdListAll")) as any;
+    ads.value = res.data;
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleCreate() {
+  if (!newName.value) return;
+  creating.value = true;
+  try {
+    await http.post("/api/ad/createAd", {
+      name: newName.value,
+      adType: newAdType.value,
+      sourceFilePath: newAdType.value === "text" ? undefined : newSourceFilePath.value,
+      textContent: newAdType.value === "text" ? newTextContent.value : undefined,
+      brandName: newBrandName.value || undefined,
+    });
+    newName.value = "";
+    newSourceFilePath.value = "";
+    newTextContent.value = "";
+    newBrandName.value = "";
+    MessagePlugin.success("广告素材创建成功");
+    await loadAds();
+  } catch (e: any) {
+    MessagePlugin.error(e?.message ?? "创建失败");
+  } finally {
+    creating.value = false;
+  }
+}
+
+async function handleAnalyze(adId: number) {
+  await http.post("/api/ad/analyzeAd", { adIds: [adId] });
+  MessagePlugin.info("已开始分析，请稍后刷新查看状态");
+}
+
+const statusTheme: Record<string, "default" | "success" | "danger" | "warning"> = {
+  uploaded: "default",
+  analyzing: "warning",
+  analyzed: "success",
+  failed: "danger",
+};
+
+onMounted(loadAds);
+</script>
+
+<template>
+  <div style="padding: 24px; max-width: 960px; margin: 0 auto">
+    <t-card title="新建广告素材" style="margin-bottom: 24px">
+      <t-space direction="vertical" style="width: 100%">
+        <t-space>
+          <t-input v-model="newName" placeholder="名称" />
+          <t-select v-model="newAdType" style="width: 120px">
+            <t-option value="image" label="图片" />
+            <t-option value="video" label="视频" />
+            <t-option value="text" label="纯文字" />
+          </t-select>
+          <t-input v-model="newBrandName" placeholder="品牌名（可选）" />
+        </t-space>
+        <t-input v-if="newAdType !== 'text'" v-model="newSourceFilePath" placeholder="服务器本地文件路径" />
+        <t-textarea v-else v-model="newTextContent" placeholder="广告文案" />
+        <t-button theme="primary" :loading="creating" @click="handleCreate">创建</t-button>
+      </t-space>
+    </t-card>
+
+    <t-table :data="ads" :loading="loading" row-key="id" :columns="[
+      { colKey: 'id', title: 'ID', width: 60 },
+      { colKey: 'name', title: '名称' },
+      { colKey: 'adType', title: '类型', width: 100 },
+      { colKey: 'status', title: '状态' },
+      { colKey: 'op', title: '操作', width: 140 },
+    ]">
+      <template #status="{ row }">
+        <t-tag :theme="statusTheme[row.status] ?? 'default'" variant="light">{{ row.status }}</t-tag>
+      </template>
+      <template #op="{ row }">
+        <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
+      </template>
+    </t-table>
+  </div>
+</template>

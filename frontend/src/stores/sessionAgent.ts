@@ -1,0 +1,93 @@
+// Session（=Episode）维度的 store 工厂，每个 episodeId 一个独立 store 实例（Map 缓存），
+// 照抄 Toonflow-web 的 store-per-session 模式（src/stores/scriptAgent.ts）。
+import { ref } from "vue";
+import { defineStore } from "pinia";
+import http from "@/utils/http";
+import { useChat } from "@/composables/useChat";
+
+export interface SessionState {
+  episode: { id: number; title: string; status: string; workflowStage: string; durationMs: number | null; createTime: number | null };
+  creativePlans: {
+    id: number;
+    adId: number;
+    formatSequence: string[];
+    narrative: string;
+    tone: string;
+    planEvaluatorScore: number;
+    status: "draft" | "approved" | "rejected";
+  }[];
+  bridgeCuts: {
+    id: number;
+    creativePlanId: number;
+    index: number;
+    type: "video" | "playableGame" | "ctaCard";
+    status: string;
+    durationMs: number | null;
+    latestDraft: { imageUrl: string; prompt: string | null } | null;
+    latestRender: { url: string; filePath: string } | null;
+  }[];
+  manifest: { id: number; type: string; deliverableUrl: string; ctaUrl?: string } | null;
+}
+
+function makeSessionAgentStore(episodeId: number) {
+  return defineStore(`sessionAgent-${episodeId}`, () => {
+    const sessionState = ref<SessionState | null>(null);
+    const loadingSessionState = ref(false);
+
+    const chat = useChat({
+      url: "/api/socket/sessionAgent",
+      auth: () => ({ episodeId }),
+      manageLifecycle: false,
+      autoConnect: false,
+    });
+
+    async function loadSessionState() {
+      loadingSessionState.value = true;
+      try {
+        const res = (await http.post("/api/episode/getSessionState", { episodeId })) as any;
+        sessionState.value = res.data;
+      } finally {
+        loadingSessionState.value = false;
+      }
+    }
+
+    function generatePlan(adIds: number[]) {
+      chat.socket.value?.emit("plan:generate", { adIds });
+    }
+    function approvePlan(planId: number) {
+      chat.socket.value?.emit("plan:approve", { planId });
+    }
+    function generateBridgeCuts(creativePlanId: number) {
+      chat.socket.value?.emit("bridgeCut:generate", { creativePlanId });
+    }
+    function confirmBridgeCuts(creativePlanId: number) {
+      chat.socket.value?.emit("bridgeCut:confirm", { creativePlanId });
+    }
+    function confirmContent(creativePlanId: number) {
+      chat.socket.value?.emit("content:confirm", { creativePlanId });
+    }
+    function retryBridgeCut(bridgeCutId: number) {
+      chat.socket.value?.emit("bridgeCut:retry", { bridgeCutId });
+    }
+
+    return {
+      ...chat,
+      sessionState,
+      loadingSessionState,
+      loadSessionState,
+      generatePlan,
+      approvePlan,
+      generateBridgeCuts,
+      confirmBridgeCuts,
+      confirmContent,
+      retryBridgeCut,
+    };
+  });
+}
+
+const storeMap = new Map<number, ReturnType<typeof makeSessionAgentStore>>();
+
+export default function useSessionAgentStore(episodeId: number) {
+  if (!storeMap.has(episodeId)) storeMap.set(episodeId, makeSessionAgentStore(episodeId));
+  return storeMap.get(episodeId)!();
+}

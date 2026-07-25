@@ -5,7 +5,8 @@
     "build/*",
     "dist/*",
     "router.ts",
-    "database.d.ts"
+    "database.d.ts",
+    "frontend/*"
   ],
   "events": {
     "restart": ""
