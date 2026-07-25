@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import http from "@/utils/http";
 
@@ -56,9 +56,24 @@ async function handleCreate() {
   }
 }
 
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function pollUntilSettled() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    await loadAds();
+    if (!ads.value.some((a) => a.status === "analyzing")) {
+      clearInterval(pollTimer!);
+      pollTimer = null;
+    }
+  }, 3000);
+}
+
 async function handleAnalyze(adId: number) {
   await http.post("/api/ad/analyzeAd", { adIds: [adId] });
-  MessagePlugin.info("已开始分析，请稍后刷新查看状态");
+  MessagePlugin.info("已开始分析，完成后会自动刷新状态");
+  await loadAds();
+  pollUntilSettled();
 }
 
 const statusTheme: Record<string, "default" | "success" | "danger" | "warning"> = {
@@ -68,7 +83,13 @@ const statusTheme: Record<string, "default" | "success" | "danger" | "warning"> 
   failed: "danger",
 };
 
-onMounted(loadAds);
+onMounted(async () => {
+  await loadAds();
+  if (ads.value.some((a) => a.status === "analyzing")) pollUntilSettled();
+});
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer);
+});
 </script>
 
 <template>

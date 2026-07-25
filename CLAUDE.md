@@ -36,6 +36,7 @@
 - **`.env` 是密钥的唯一入口**：`cp .env.example .env` 后自己填真实值，应用启动时 `src/lib/syncEnvVendors.ts` 自动把 `.env` 里配置的 key 同步进 `o_vendorConfig` 数据库并启用对应供应商，改完 `.env` 重启一下服务就生效，不用每次手写 curl 调 `updateVendorInputs`。
 - **`scripts/smoketest/` 是验证约定**：每新写一个能力，配一个独立可以直接 `npx tsx scripts/smoketest/xxx.ts` 跑的验证脚本，真实调用外部服务（不是 mock），M0/M1 全程都是这么验证的，建议后续里程碑继续保持这个习惯——比空谈"应该没问题"可靠得多。
 - **`data/test-assets/`** 下已经有现成测试素材：`sample.wav`（真人语音，用 macOS `say` 命令合成的）、`sample-episode.mp4`（12 秒合成测试视频，SMPTE 测试图案 + 上面那段语音，终审面对这份素材永远会诚实判定不通过）。做新 Agent 的验证优先复用这些，不用每次现造。`m6-episode.mp4`/`m6-ad-*.jpg` 是 M6 新生成的、更接近真实观感的虚构素材（AI 生成的插画风格短剧片段 + 三个虚构广告品牌），需要验证终审在有真实叙事内容素材上的表现时用这套，见 `docs/milestones/M6.md`。
+- **M0-M6 全部完成之后，零散的修改意见和小改动记在 `docs/CHANGELOG.md`**，不再各自开一个里程碑文档——每次改完东西（不管是用户反馈驱动的还是顺手修的），照着文件里的格式加一条新记录（时间倒序，最新的放最上面）。
 
 ## 技术栈速查
 
