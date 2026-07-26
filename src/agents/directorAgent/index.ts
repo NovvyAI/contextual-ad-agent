@@ -1,8 +1,10 @@
+import fs from "fs";
+import path from "path";
 import u from "@/utils";
 import type { EpisodeAnalysis } from "@/agents/storyboardAgent/schema";
 import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import { planGenerationSchema, planEvaluationBatchSchema, type PlanDraft, type PlanEvaluation } from "./schema";
-import { GENERATION_SYSTEM_PROMPT, buildPlanGenerationMessages, buildPlanEvaluationMessages, buildReviseMessages } from "./prompt";
+import { buildPlanGenerationMessages, buildPlanEvaluationMessages, buildReviseMessages } from "./prompt";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -57,15 +59,18 @@ export async function generatePlans(episodeId: number, adIds: number[]): Promise
   const episodeAnalysis = await loadEpisodeAnalysis(episodeId);
   const ads = await loadAnalyzedAds(adIds);
 
+  const creativePrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_creative.md"), "utf-8");
+  const evaluatorPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_evaluator.md"), "utf-8");
+
   const { object: generation } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planGenerationSchema,
-    system: GENERATION_SYSTEM_PROMPT,
+    system: creativePrompt,
     messages: buildPlanGenerationMessages(episodeAnalysis, ads),
   });
 
   const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planEvaluationBatchSchema,
-    system: GENERATION_SYSTEM_PROMPT,
+    system: evaluatorPrompt,
     messages: buildPlanEvaluationMessages(episodeAnalysis, generation.plans),
   });
 
@@ -92,15 +97,18 @@ export async function revisePlan(planId: number, feedback: string): Promise<Crea
   const episodeAnalysis = await loadEpisodeAnalysis(row.episodeId);
   const existingPlan: PlanDraft = { adId: row.adId, narrative: row.narrative, tone: row.tone };
 
+  const creativePrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_creative.md"), "utf-8");
+  const evaluatorPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_evaluator.md"), "utf-8");
+
   const { object: revised } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planGenerationSchema.shape.plans.element,
-    system: GENERATION_SYSTEM_PROMPT,
+    system: creativePrompt,
     messages: buildReviseMessages(episodeAnalysis, existingPlan, feedback),
   });
 
   const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planEvaluationBatchSchema,
-    system: GENERATION_SYSTEM_PROMPT,
+    system: evaluatorPrompt,
     messages: buildPlanEvaluationMessages(episodeAnalysis, [revised]),
   });
 

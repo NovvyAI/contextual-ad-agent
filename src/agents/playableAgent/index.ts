@@ -1,8 +1,9 @@
 import fs from "fs";
+import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { playableConfigSchema, type PlayableConfig } from "./schema";
-import { SYSTEM_PROMPT, buildGenerateMessages, buildReviseMessages } from "./prompt";
+import { buildGenerateMessages, buildReviseMessages } from "./prompt";
 import { evaluatePlayable, type PlayableEvaluation } from "./evaluator";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
@@ -89,10 +90,11 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
 
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: playableConfigSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildGenerateMessages(episodeAnalysis, ad),
       },
       { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
@@ -114,11 +116,12 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
 
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as PlayableConfig;
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: playableConfigSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
       },
       { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },

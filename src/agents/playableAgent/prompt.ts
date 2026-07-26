@@ -3,10 +3,6 @@ import type { EpisodeAnalysis } from "@/agents/storyboardAgent/schema";
 import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import type { PlayableConfig } from "./schema";
 
-export const SYSTEM_PROMPT =
-  "你负责为短剧结尾配一个可玩的 H5 配对小游戏广告（翻牌配对玩法，玩家找出图案相同的两张牌）。" +
-  "你要构思游戏标题、跳转链接、以及配对用的图片素材 prompt（图片会交给图片生成模型产出），素材应该围绕广告的产品/品牌视觉展开。";
-
 function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): string {
   return [
     `## Episode 结尾基调\n${episodeAnalysis.endingState.summary}（建议基调：${episodeAnalysis.endingState.suggestedTone}）`,

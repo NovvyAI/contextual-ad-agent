@@ -3,15 +3,6 @@ import type { ModelMessage } from "ai";
 import type { FrameRecord } from "@/utils/video";
 import type { AsrSegment } from "@/utils/asr";
 
-export const EPISODE_ANALYSIS_SYSTEM_PROMPT =
-  "你是短剧内容分析助手。你会收到一集短剧的抽帧画面（覆盖全片的稀疏采样 + 结尾部分的密集采样）和台词转写文本，" +
-  "需要据此产出结构化的剧集分析，供后续制作广告桥接内容使用。请重点关注结尾部分的画面和情绪状态，" +
-  "因为广告将紧接着结尾播放，需要自然衔接。\n" +
-  "特别注意区分两种情绪，不要混为一谈：emotionArc 描述的是剧中角色/画面本身随时间变化的情绪基调；" +
-  "而 endingState.viewerEmotionalState 描述的是观众看完这一集后自己的心理状态（他们会带着什么情绪、" +
-  "什么样尚未被满足的心理诉求进入下一段内容），这是桥接内容设计要承接的落点，需要你站在观众视角单独分析，" +
-  "不能直接照抄剧中人物在结尾的情绪。";
-
 function frameToContentParts(frame: FrameRecord, label: string) {
   const ts = frame.approxTimestampS != null ? ` ~${frame.approxTimestampS}s` : "";
   return [

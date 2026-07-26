@@ -3,7 +3,7 @@ import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
-import { SYSTEM_PROMPT, buildStageADraftMessages, buildReviseMessages } from "./prompt";
+import { buildStageADraftMessages, buildReviseMessages } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
@@ -97,10 +97,11 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
 
   try {
     const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
     const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: stageADraftSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildStageADraftMessages(episodeAnalysis, ad),
       },
       { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
@@ -123,11 +124,12 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
 
   try {
     const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as StageADraft;
     const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: stageADraftSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
       },
       { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
