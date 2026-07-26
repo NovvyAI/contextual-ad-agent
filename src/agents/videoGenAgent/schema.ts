@@ -1,8 +1,17 @@
 import { z } from "zod";
 
+export const shotSizeEnum = z.enum(["远景", "全景", "中景", "近景", "特写", "大特写"]);
+export const cameraMovementEnum = z.enum(["静止", "推进", "拉远", "跟踪", "摇镜", "甩镜", "升降", "环绕"]);
+
 export const stageADraftSchema = z.object({
-  prompt: z.string().describe("喂给图片生成模型的分镜草案 prompt，需体现从 Episode 结尾画面到广告开场的过渡构思"),
-  framingNotes: z.string().describe("构图/机位/转场设想的简短说明，供 Stage B 渲染成片时保持连贯参考，不直接喂给模型"),
+  shotSize: shotSizeEnum.describe("镜头景别"),
+  cameraMovement: cameraMovementEnum.describe("运镜方式"),
+  subjectAction: z
+    .string()
+    .describe("画面主体的动作/状态，以及从 Episode 结尾画面过渡到游戏开场的具体呈现方式，严格基于给定的结尾状态和游戏信息，不编造额外情节"),
+  lightingMood: z.string().describe("光影氛围"),
+  emotionalTone: z.string().describe("情绪基调，应承接 Episode 结尾观众的情绪状态"),
+  framingNotes: z.string().describe("构图/机位的简短补充说明，供 Stage B 渲染成片时保持连贯参考，不直接喂给模型"),
 });
 
 export const bridgeVideoEvaluationSchema = z.object({
@@ -16,5 +25,7 @@ export const bridgeVideoEvaluationSchema = z.object({
   feedback: z.string().describe("一句话点评"),
 });
 
+export type ShotSize = z.infer<typeof shotSizeEnum>;
+export type CameraMovement = z.infer<typeof cameraMovementEnum>;
 export type StageADraft = z.infer<typeof stageADraftSchema>;
 export type BridgeVideoEvaluation = z.infer<typeof bridgeVideoEvaluationSchema>;

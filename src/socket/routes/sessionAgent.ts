@@ -54,7 +54,7 @@ export default (nsp: Namespace) => {
           bridgeCutId: cut.id,
           index: cut.index,
           imageUrl: result.imageUrl,
-          prompt: result.draft.prompt,
+          prompt: result.assembledPrompt,
           status: "draft",
           evaluatorScore: result.evaluation.overallScore,
           evaluatorFeedback: result.evaluation.feedback,

@@ -62,7 +62,7 @@ function createTools(ctx: AgentContext) {
         bridgeCutId: updated.bridgeCutId,
         index: cutRow?.index ?? 0,
         imageUrl: updated.imageUrl,
-        prompt: updated.draft.prompt,
+        prompt: updated.assembledPrompt,
         status: "draft",
         evaluatorScore: updated.evaluation.overallScore,
         evaluatorFeedback: updated.evaluation.feedback,

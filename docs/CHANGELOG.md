@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 VideoGenAgent 分镜草案改成结构化字段 + 按 Stage 拆分两套 prompt 模板
+
+**触发原因**：参考 Toonflow-app `data/modelPrompt/video/` 下的几份视频提示词模板研究"如何和用户交互生成视频"，发现它是按供应商/模型的参考图输入能力分成好几套模板——多参考图场景用 `@图N` 编号引用消歧，单参考图场景没有编号消歧的必要，用单段式散文表达。对照 VideoGenAgent 自己的两个 stage：Stage A（gpt-image-1 草案图）最多有 2 张参考图（Episode 结尾帧 + 广告参考图），天然需要消歧；Stage B（Seedance-2.0 成片渲染，`mode:["singleImage"]`）只有 1 张参考图（已确认的草案图本身），没有消歧问题。而 VideoGenAgent 原来的 `stageADraftSchema` 只有一个笼统的 `{prompt, framingNotes}`，两个 stage 共用同一段自由文本，没有体现这个结构性差异，讨论后决定现在就做这次重构（不算启动 M8，M8 里真正大头的真实截图提取、PlayableAgent 素材来源分支、SupervisorAgent 终审升级都还没动）。
+
+**改了什么**：`src/agents/videoGenAgent/schema.ts` 的 `stageADraftSchema` 从 `{prompt, framingNotes}` 改成结构化字段：`shotSize`/`cameraMovement`（枚举，从固定选项里选，不再让模型自由发挥镜头语言）+ `subjectAction`/`lightingMood`/`emotionalTone`/`framingNotes`（自由文本，但职责更聚焦）。`src/agents/videoGenAgent/prompt.ts` 新增两个组装函数，替代原来"LLM 直接产出最终 prompt"的做法：`assembleStageAPrompt`（参考 Toonflow `universalMulti-parameterMode.md`，按实际存在的参考图数量动态编号 `@图1`/`@图2`，让模型明确知道每张参考图在画面里的角色）、`assembleStageBPrompt`（参考 Toonflow `wan2.6Single-imageFirstFrameMode.md`，单段式散文，不用编号）；两个函数都在景别/运镜后面附上标准英文镜头术语（如"近景（close-up）"），给生成模型一个更精确的锚点，但不整段翻译成英文——这个项目的中文 prompt 在 gpt-image-1/Seedance 上本来就跑得通，没必要改。`src/agents/videoGenAgent/index.ts`/`evaluator.ts` 相应改造：`renderDraftImage`/`renderStageB` 改用组装函数产出的 prompt 喂给模型，`DraftCutResult` 新增 `assembledPrompt` 字段；`evaluateDraft`/`evaluateRender` 的评估上下文改成拼接结构化字段。`src/socket/routes/sessionAgent.ts`/`src/agents/sessionAgent/index.ts` 里给 `storyboardCut` 卡片传 `prompt` 的地方从 `result.draft.prompt`（已不存在）改成 `result.assembledPrompt`。
+
+**验证**：`npx tsc --noEmit -p .` 全程 clean。真实调用 `scripts/smoketest/videoGenAgent.ts` 验证 Stage A：`generateDraftCut`/`reviseDraftCut` 均成功，日志里 `assembledPrompt` 正确按实际找到的参考图数量编号（这次只找到广告参考图，正确编成唯一的 `@图1`，没有虚标不存在的 `@图2`），revise 反馈"画面再明亮一点，突出产品本身"后 `cameraMovement` 从"静止"变成"推进"、`lightingMood` 明显提亮，评估分从 57 升到 72，说明结构化字段确实在正确响应用户反馈。Stage B 验证：`confirmAllCuts` 这一步因为方案 4 底下有一条很早以前遗留的 `done` 状态旧 cut（和这次改动无关的历史脏数据）而报错，绕过后直接调用 `renderStageB` 单独验证——真实调用 Seedance 渲染出 6 秒成片，`videoUrl` 正常返回，终审评分合理（`narrativeContinuity` 94、`visualConsistency` 92）。
+
+---
+
 ## 2026-07-25 业务表 id 迁移成 AUTOINCREMENT，修复删除后 id 复用导致的串号
 
 **触发原因**：用户删除一个 Episode 后新建一个，进入会话发现里面显示的是旧 Episode 早就失败的 bridgeCut/creativePlan 数据，随后生成创意方案时还报了一次 `FOREIGN KEY constraint failed`。排查确认：`ab_episode` 等业务表的 `id` 只是普通 `integer` 主键，没有声明 `AUTOINCREMENT`——SQLite 对这种主键的默认行为是"删除后号码可以被回收"，新建的 Episode 恰好复用了刚删掉的旧 Episode 的 id，导致前端按 id 缓存的会话状态（Pinia store）和后端在某个时间窗口内对不上号。这是加了删除功能（M6 之后新增）才第一次暴露出来的问题，此前项目里从来没有删除过任何数据，id 从未被复用过。

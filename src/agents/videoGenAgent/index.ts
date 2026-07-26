@@ -3,7 +3,7 @@ import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
-import { buildStageADraftMessages, buildReviseMessages } from "./prompt";
+import { buildStageADraftMessages, buildReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
@@ -14,6 +14,7 @@ const STAGE_B_DURATION_S = 6;
 export interface DraftCutResult {
   bridgeCutId: number;
   draft: StageADraft;
+  assembledPrompt: string;
   imageUrl: string;
   evaluation: BridgeVideoEvaluation;
 }
@@ -50,23 +51,30 @@ function findAdReferenceFrame(adId: number, adType: string | null, sourceFilePat
   return null;
 }
 
-async function buildReferenceList(episodeId: number, adId: number): Promise<{ type: "image"; base64: string }[]> {
+interface ReferenceBundle {
+  refs: { type: "image"; base64: string }[];
+  hasEpisodeFrame: boolean;
+  hasAdFrame: boolean;
+}
+
+async function buildReferenceList(episodeId: number, adId: number): Promise<ReferenceBundle> {
   const adRow = await u.db("ab_ad").where("id", adId).first();
   const refs: { type: "image"; base64: string }[] = [];
   const episodeFrame = findEpisodeLastFrame(episodeId);
   if (episodeFrame) refs.push({ type: "image", base64: fileToBase64(episodeFrame) });
   const adFrame = findAdReferenceFrame(adId, adRow?.adType ?? null, adRow?.sourceFilePath ?? null);
   if (adFrame) refs.push({ type: "image", base64: fileToBase64(adFrame) });
-  return refs;
+  return { refs, hasEpisodeFrame: episodeFrame != null, hasAdFrame: adFrame != null };
 }
 
-async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, draft: StageADraft): Promise<string> {
-  const referenceList = await buildReferenceList(episodeId, adId);
+async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, draft: StageADraft): Promise<{ imageUrl: string; assembledPrompt: string }> {
+  const { refs, hasEpisodeFrame, hasAdFrame } = await buildReferenceList(episodeId, adId);
+  const assembledPrompt = assembleStageAPrompt(draft, hasEpisodeFrame, hasAdFrame);
   const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
   const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
     {
-      prompt: draft.prompt,
-      referenceList: referenceList.length > 0 ? referenceList : undefined,
+      prompt: assembledPrompt,
+      referenceList: refs.length > 0 ? refs : undefined,
       size: "1K",
       aspectRatio: "9:16",
     },
@@ -84,9 +92,9 @@ async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: nu
     isSelected: 1,
     createTime: Date.now(),
   });
-  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(draft), prompt: draft.prompt, status: "draft" });
+  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(draft), prompt: assembledPrompt, status: "draft" });
 
-  return u.oss.getFileUrl(relPath);
+  return { imageUrl: await u.oss.getFileUrl(relPath), assembledPrompt };
 }
 
 export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutResult> {
@@ -107,8 +115,8 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
       { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
-    return { bridgeCutId, draft, imageUrl, evaluation };
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
     throw e;
@@ -135,8 +143,8 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
       { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
-    return { bridgeCutId, draft, imageUrl, evaluation };
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
     throw e;
@@ -185,7 +193,7 @@ export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
         duration: STAGE_B_DURATION_S,
         resolution: "1080p",
         aspectRatio: "9:16",
-        prompt: draft.prompt,
+        prompt: assembleStageBPrompt(draft),
         referenceList: [{ type: "image", base64: draftImageBase64 }],
         mode: ["singleImage"],
       },
