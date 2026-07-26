@@ -38,15 +38,14 @@ export type PlanCandidateContent = ChatBaseContent<
     id: number;
     adId: number;
     adName?: string;
-    formatSequence: string[];
     narrative: string;
     tone: string;
     planEvaluatorScore: number;
     status: "draft" | "approved" | "rejected";
-    evaluatorFeedback?: { narrativeFeasibility: number; formatFit: number; adAlignment: number; feedback: string };
+    evaluatorFeedback?: { narrativeFeasibility: number; gameRelevance: number; adAlignment: number; feedback: string };
   }
 >;
-// M3：BridgeVideoAgent Stage A 分镜草案卡片
+// M3：VideoGenAgent Stage A 分镜草案卡片
 export type StoryboardCutContent = ChatBaseContent<
   "storyboardCut",
   {
@@ -59,15 +58,15 @@ export type StoryboardCutContent = ChatBaseContent<
     evaluatorFeedback?: string;
   }
 >;
-// M3：BridgeVideoAgent Stage B 渲染成片候选
+// M3：VideoGenAgent Stage B 渲染成片候选
 export type VideoCandidateContent = ChatBaseContent<
   "videoCandidate",
   { bridgeCutId: number; videoUrl: string; durationMs: number; evaluatorScore: number; evaluatorFeedback?: string }
 >;
-// M3：PlayableAgent/OverlayAgent 共用的候选卡片
+// PlayableAgent 产出的互动游戏包候选卡片
 export type ContentCandidateContent = ChatBaseContent<
   "contentCandidate",
-  { bridgeCutId: number; type: "playableGame" | "ctaCard"; previewUrl: string; ctaUrl?: string; evaluatorScore: number; evaluatorFeedback?: string }
+  { bridgeCutId: number; type: "playableGame"; previewUrl: string; ctaUrl?: string; evaluatorScore: number; evaluatorFeedback?: string }
 >;
 // M4：SupervisorAgent 落地前终审结果——真正的拦截判定，不是参考分
 export type SupervisorResultContent = ChatBaseContent<

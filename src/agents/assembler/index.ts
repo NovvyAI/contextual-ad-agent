@@ -1,4 +1,3 @@
-import fs from "fs";
 import path from "path";
 import u from "@/utils";
 import { concatVideos } from "@/utils/video";
@@ -21,8 +20,8 @@ export interface AssembledDeliverable {
 }
 
 /**
- * 按 cut 的 type 三分支组装交付物，纯代码无 LLM。
- * 单独导出（不强制"一份方案唯一一个 cut"这条正式路径的不变量），方便直接对某个 cut 做验证。
+ * 按 cut 的 type 两分支组装交付物，纯代码无 LLM。
+ * 单独导出（不强制"固定两段 cut"这条正式路径的不变量），方便直接对某个 cut 做验证。
  */
 export async function assembleCut(bridgeCutId: number): Promise<AssembledDeliverable> {
   const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
@@ -59,31 +58,15 @@ export async function assembleCut(bridgeCutId: number): Promise<AssembledDeliver
     };
   }
 
-  if (cut.type === "ctaCard") {
-    // Episode 原片路径是用户建 Episode 时随便传的绝对/相对路径，不保证在 OSS 静态服务目录下，复制一份进去保证可访问
-    const ext = path.extname(episode.sourceFilePath) || ".mp4";
-    const outputAbsPath = ossAbsPath(plan.episodeId, cut.creativePlanId, `episode-original${ext}`);
-    fs.mkdirSync(path.dirname(outputAbsPath), { recursive: true });
-    fs.copyFileSync(episode.sourceFilePath, outputAbsPath);
-    const ctaConfig = cut.scriptText ? JSON.parse(cut.scriptText) : {};
-    return {
-      bridgeCutId,
-      type: cut.type,
-      finalFilePath: ossRelPath(plan.episodeId, cut.creativePlanId, path.basename(outputAbsPath)),
-      kind: "video",
-      assets: { ctaUrl: ctaConfig.ctaUrl, ctaImagePath: finalSegment.filePath },
-    };
-  }
-
   throw new Error(`未知的 cut 类型: ${cut.type}`);
 }
 
-/** 正式路径：一份已批准方案永远只对应一个 cut，校验这条不变量后再组装+写 manifest */
+/** 正式路径：M7 起固定两段式管线，最终交付物永远是 playableGame 段——video 段的产物已经被嵌进它里面，不再单独落地 */
 export async function assemble(episodeId: number, creativePlanId: number, supervision?: SupervisionOutcome): Promise<number> {
   const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId);
-  if (cuts.length !== 1) throw new Error(`创意方案 ${creativePlanId} 应该只有一个 cut，实际 ${cuts.length} 个`);
-  const cutId = cuts[0].id;
-  if (cutId == null) throw new Error(`Cut 数据不完整`);
+  const cut = cuts.find((c: any) => c.type === "playableGame");
+  if (!cut?.id) throw new Error(`创意方案 ${creativePlanId} 缺少 playableGame cut`);
+  const cutId = cut.id;
 
   const deliverable = await assembleCut(cutId);
   const url = await u.oss.getFileUrl(deliverable.finalFilePath);

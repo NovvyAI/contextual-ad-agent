@@ -8,6 +8,8 @@ const collapsed = ref(true);
 
 const roleLabel: Record<string, string> = { protagonist: "主角", antagonist: "反派", supporting: "配角" };
 const roleTheme: Record<string, "primary" | "danger" | "default"> = { protagonist: "primary", antagonist: "danger", supporting: "default" };
+const intensityLabel: Record<string, string> = { high: "高", medium: "中", low: "低" };
+const intensityTheme: Record<string, "danger" | "warning" | "default"> = { high: "danger", medium: "warning", low: "default" };
 </script>
 
 <template>
@@ -49,6 +51,20 @@ const roleTheme: Record<string, "primary" | "danger" | "default"> = { protagonis
           最后画面：{{ analysis.endingState.lastVisualDescription }}
         </div>
         <div style="color: var(--td-text-color-secondary, #666); font-size: 13px">建议桥接基调：{{ analysis.endingState.suggestedTone }}</div>
+      </div>
+
+      <div v-if="analysis.endingState.viewerEmotionalState">
+        <b>观众看完后的情绪：</b>
+        <t-tag theme="primary" variant="light" size="small">{{ analysis.endingState.viewerEmotionalState.primaryEmotion }}</t-tag>
+        <t-tag :theme="intensityTheme[analysis.endingState.viewerEmotionalState.intensity] ?? 'default'" variant="light" size="small" style="margin-left: 4px">
+          强度：{{ intensityLabel[analysis.endingState.viewerEmotionalState.intensity] ?? analysis.endingState.viewerEmotionalState.intensity }}
+        </t-tag>
+        <div style="color: var(--td-text-color-secondary, #666); font-size: 13px; margin-top: 2px">
+          尚未满足的心理诉求：{{ analysis.endingState.viewerEmotionalState.residualTension }}
+        </div>
+        <div style="color: var(--td-text-color-secondary, #666); font-size: 13px">
+          适合承接的内容：{{ analysis.endingState.viewerEmotionalState.transitionReadiness }}
+        </div>
       </div>
     </t-space>
   </div>

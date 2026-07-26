@@ -3,9 +3,11 @@ import { z } from "zod";
 // 这是 LLM 要返回的部分——id/sourceType/hasVisualAsset 由代码这边算，不问模型要
 export const adAnalysisSchema = z.object({
   tone: z.string().describe("广告调性/风格，如：幽默、温情、专业、刺激"),
-  product: z.object({
-    name: z.string().describe("产品/品牌名称"),
-    category: z.string().optional().describe("产品品类"),
+  game: z.object({
+    name: z.string().describe("游戏名称"),
+    genre: z.string().describe("游戏类型/品类，如：休闲益智、放置、卡牌、跑酷"),
+    coreMechanic: z.string().describe("核心玩法机制简述"),
+    visualStyle: z.string().describe("视觉风格描述，如：像素风、Q版3D、写实、二次元"),
     keySellingPoints: z.array(z.string()).describe("核心卖点列表"),
   }),
   brandSafety: z.object({

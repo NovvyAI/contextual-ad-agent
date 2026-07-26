@@ -71,7 +71,7 @@ export default async (knex: Knex): Promise<void> => {
   }
   // M3: 执行层三个 Agent 共用 ab_generatedSegment 存生成产物。isSelected 标记同一个 (bridgeCutId, stage)
   // 下当前生效的那一行（重生成不覆盖旧行，插入新行 + 把旧行标记为非当前，天然保留重生成历史）；
-  // stage 区分同一个 cut 下不同阶段的产物（BridgeVideoAgent 的 draftImage/finalRender，其余两个 Agent 只有 finalRender）。
+  // stage 区分同一个 cut 下不同阶段的产物（VideoGenAgent 的 draftImage/finalRender，其余两个 Agent 只有 finalRender）。
   await addColumn("ab_generatedSegment", "isSelected", "integer");
   await addColumn("ab_generatedSegment", "stage", "text");
   // M6: 联调验收阶段要做分阶段耗时统计，o_tasks 补一列毫秒级耗时（taskRecord.ts 的 done() 里写入）
@@ -106,7 +106,6 @@ export default async (knex: Knex): Promise<void> => {
     t.increments("id");
     t.integer("episodeId").unsigned().references("id").inTable("ab_episode");
     t.integer("adId").unsigned().references("id").inTable("ab_ad");
-    t.text("formatSequence");
     t.text("narrative");
     t.text("tone");
     t.integer("planEvaluatorScore");
@@ -144,7 +143,8 @@ export default async (knex: Knex): Promise<void> => {
     t.text("status");
     t.integer("createTime");
   });
-  void dropColumn;
+  // M7：三选一桥接形式改成固定"过渡视频→H5 小游戏"两段式管线，DirectorAgent 不再需要 formatSequence 这一列
+  await dropColumn("ab_creativePlan", "formatSequence");
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，
   // 读取源码跑一遍沙箱拿到 vendor.id/inputValues，写入一行禁用状态的配置。

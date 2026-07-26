@@ -219,7 +219,7 @@ class MessageBuilder {
     return this;
   }
 
-  // 添加分镜草案卡片（M3 BridgeVideoAgent Stage A）
+  // 添加分镜草案卡片（M3 VideoGenAgent Stage A）
   storyboardCut(data: StoryboardCutContent["data"]) {
     const contentId = u.uuid();
     const content: StoryboardCutContent = { type: "storyboardCut", id: contentId, data, status: "complete" };
@@ -227,7 +227,7 @@ class MessageBuilder {
     return this;
   }
 
-  // 添加渲染成片候选（M3 BridgeVideoAgent Stage B）
+  // 添加渲染成片候选（M3 VideoGenAgent Stage B）
   videoCandidate(data: VideoCandidateContent["data"]) {
     const contentId = u.uuid();
     const content: VideoCandidateContent = { type: "videoCandidate", id: contentId, data, status: "complete" };
@@ -235,7 +235,7 @@ class MessageBuilder {
     return this;
   }
 
-  // 添加内容候选卡片（M3 PlayableAgent/OverlayAgent 共用）
+  // 添加内容候选卡片（PlayableAgent 的互动游戏包）
   contentCandidate(data: ContentCandidateContent["data"]) {
     const contentId = u.uuid();
     const content: ContentCandidateContent = { type: "contentCandidate", id: contentId, data, status: "complete" };

@@ -70,7 +70,7 @@ async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: nu
       size: "1K",
       aspectRatio: "9:16",
     },
-    { taskClass: "bridgeVideo-stageA-draftImage", describe: `Cut ${bridgeCutId} 分镜草案图`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+    { taskClass: "videoGen-stageA-draftImage", describe: `Cut ${bridgeCutId} 分镜草案图`, relatedObjects: String(bridgeCutId), projectId: episodeId },
   );
   await image.save(relPath);
 
@@ -92,7 +92,7 @@ async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: nu
 export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutResult> {
   const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
   if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 BridgeVideoAgent`);
+  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   try {
@@ -103,7 +103,7 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
         system: SYSTEM_PROMPT,
         messages: buildStageADraftMessages(episodeAnalysis, ad),
       },
-      { taskClass: "bridgeVideo-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
     const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
@@ -117,7 +117,7 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
 export async function reviseDraftCut(bridgeCutId: number, feedback: string): Promise<DraftCutResult> {
   const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
   if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 BridgeVideoAgent`);
+  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过草案，不能 revise`);
 
@@ -130,7 +130,7 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
         system: SYSTEM_PROMPT,
         messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
       },
-      { taskClass: "bridgeVideo-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
     const imageUrl = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
@@ -187,7 +187,7 @@ export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
         referenceList: [{ type: "image", base64: draftImageBase64 }],
         mode: ["singleImage"],
       },
-      { taskClass: "bridgeVideo-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      { taskClass: "videoGen-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
     await video.save(relPath);

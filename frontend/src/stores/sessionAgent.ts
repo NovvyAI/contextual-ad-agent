@@ -10,7 +10,13 @@ export interface EpisodeAnalysis {
   characters: { name: string; description: string; role: "protagonist" | "antagonist" | "supporting" }[];
   emotionArc: { timestampS: number; emotion: string; description?: string }[];
   keyVisuals: { timestampS: number; description: string; importance?: "high" | "medium" | "low" }[];
-  endingState: { summary: string; cliffhanger: boolean; lastVisualDescription: string; suggestedTone: string };
+  endingState: {
+    summary: string;
+    cliffhanger: boolean;
+    lastVisualDescription: string;
+    suggestedTone: string;
+    viewerEmotionalState: { primaryEmotion: string; intensity: "high" | "medium" | "low"; residualTension: string; transitionReadiness: string };
+  };
 }
 
 export interface SessionState {
@@ -26,7 +32,6 @@ export interface SessionState {
   creativePlans: {
     id: number;
     adId: number;
-    formatSequence: string[];
     narrative: string;
     tone: string;
     planEvaluatorScore: number;
@@ -36,7 +41,7 @@ export interface SessionState {
     id: number;
     creativePlanId: number;
     index: number;
-    type: "video" | "playableGame" | "ctaCard";
+    type: "video" | "playableGame";
     status: string;
     durationMs: number | null;
     latestDraft: { imageUrl: string; prompt: string | null } | null;
@@ -79,6 +84,9 @@ function makeSessionAgentStore(episodeId: number) {
     function confirmBridgeCuts(creativePlanId: number) {
       chat.socket.value?.emit("bridgeCut:confirm", { creativePlanId });
     }
+    function assemblePlayableCut(creativePlanId: number) {
+      chat.socket.value?.emit("bridgeCut:assemblePlayable", { creativePlanId });
+    }
     function confirmContent(creativePlanId: number) {
       chat.socket.value?.emit("content:confirm", { creativePlanId });
     }
@@ -95,6 +103,7 @@ function makeSessionAgentStore(episodeId: number) {
       approvePlan,
       generateBridgeCuts,
       confirmBridgeCuts,
+      assemblePlayableCut,
       confirmContent,
       retryBridgeCut,
     };

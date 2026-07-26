@@ -56,13 +56,11 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
 
   const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
 
-  // video 类型复用 Stage A 的草案图做审核依据，不为了终审重新抽帧；ctaCard 直接用产物图；playableGame 无图，只看配置
+  // video 类型复用 Stage A 的草案图做审核依据，不为了终审重新抽帧；playableGame 无图，只看配置
   let imageRelPath: string | null = null;
   if (cutType === "video") {
     const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
     imageRelPath = draftSegment?.filePath ?? null;
-  } else if (cutType === "ctaCard") {
-    imageRelPath = finalSegment?.filePath ?? null;
   }
 
   const messages = buildSupervisionMessages(
@@ -80,11 +78,10 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
   return { bridgeCutId, ...object };
 }
 
-/** 正式路径：一份已批准方案永远只对应一个 cut，校验这条不变量后再终审 */
+/** 正式路径：M7 起固定两段式管线，落地终审只看 playableGame 段——它是唯一真正的最终交付物，video 段只是被嵌进它里面的过渡素材 */
 export async function runSupervision(creativePlanId: number): Promise<SupervisionOutcome> {
   const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId);
-  if (cuts.length !== 1) throw new Error(`创意方案 ${creativePlanId} 应该只有一个内容 cut，实际 ${cuts.length} 个`);
-  const cutId = cuts[0].id;
-  if (cutId == null) throw new Error(`Cut 数据不完整`);
-  return runSupervisionForCut(cutId);
+  const cut = cuts.find((c: any) => c.type === "playableGame");
+  if (!cut?.id) throw new Error(`创意方案 ${creativePlanId} 缺少 playableGame cut`);
+  return runSupervisionForCut(cut.id);
 }

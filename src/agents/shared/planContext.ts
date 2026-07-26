@@ -10,7 +10,7 @@ export interface PlanContext {
   ad: AdEntry;
 }
 
-/** OverlayAgent/PlayableAgent/BridgeVideoAgent 都要从 bridgeCut 反查到 episode+ad 的分析结果，共用这一份 */
+/** PlayableAgent/VideoGenAgent 都要从 bridgeCut 反查到 episode+ad 的分析结果，共用这一份 */
 export async function loadPlanContext(creativePlanId: number): Promise<PlanContext> {
   const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
   if (!plan) throw new Error(`创意方案 ${creativePlanId} 不存在`);

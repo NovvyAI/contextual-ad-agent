@@ -23,7 +23,7 @@ export interface PlayableResult {
   evaluation: PlayableEvaluation;
 }
 
-async function assemble(bridgeCutId: number, episodeId: number, config: PlayableConfig, evaluation: PlayableEvaluation): Promise<string> {
+async function assemble(bridgeCutId: number, episodeId: number, creativePlanId: number, config: PlayableConfig, evaluation: PlayableEvaluation): Promise<string> {
   const relDir = `bridgeCut/${bridgeCutId}/playable`;
   const containerTemplate = fs.readFileSync(u.getPath(["templates", "playable", "container.html"]), "utf-8");
   const gameTemplate = fs.readFileSync(u.getPath(["templates", "playable", "game.html"]), "utf-8");
@@ -44,12 +44,15 @@ async function assemble(bridgeCutId: number, episodeId: number, config: Playable
   const gameHtml = inject(gameTemplate, { title: config.title, tiles: manifestTiles, sounds: {} });
   await u.oss.writeFile(`${relDir}/game/index.html`, Buffer.from(gameHtml, "utf-8"));
 
-  // 片头视频：直接用 StoryboardAgent（M1）已经抽好的 Episode 尾帧片段，不依赖 BridgeVideoAgent 的产出
-  // （并行派发原则——PlayableAgent 不等待其他执行 Agent），后续如果要拼接桥接视频可以用 concatVideos。
-  const tailClipPath = u.getPath(["episode", String(episodeId), "tail.mp4"]);
+  // 片头视频：M7 起读取同一方案下 video 段已经渲染完成的真实过渡成片（此前是 Episode 尾帧占位，
+  // 现在游戏组装是用户手动确认触发的下一步，video 段这时必然已经 done，可以直接读它的最终产物）。
+  const videoCut = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "video").first();
+  const videoSegment = videoCut?.id
+    ? await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "finalRender").where("isSelected", 1).first()
+    : null;
   let hasVideo = false;
-  if (fs.existsSync(tailClipPath)) {
-    await u.oss.writeFile(`${relDir}/bridge.mp4`, fs.readFileSync(tailClipPath));
+  if (videoSegment?.filePath) {
+    await u.oss.writeFile(`${relDir}/bridge.mp4`, await u.oss.getFile(videoSegment.filePath));
     hasVideo = true;
   }
 
@@ -95,7 +98,7 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
       { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluatePlayable(config);
-    const previewUrl = await assemble(bridgeCutId, episodeId, config, evaluation);
+    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, config, evaluation);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -121,7 +124,7 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
       { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluatePlayable(config);
-    const previewUrl = await assemble(bridgeCutId, episodeId, config, evaluation);
+    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, config, evaluation);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });

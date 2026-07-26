@@ -35,6 +35,14 @@ export const episodeAnalysisSchema = z.object({
       cliffhanger: z.boolean().describe("是否存在悬念钩子"),
       lastVisualDescription: z.string().describe("片尾最后画面的描述，供后续桥接广告衔接参考"),
       suggestedTone: z.string().describe("建议桥接广告承接的情绪基调"),
+      viewerEmotionalState: z
+        .object({
+          primaryEmotion: z.string().describe("观众看完本集后的主要情绪，如：紧张/期待/失落"),
+          intensity: z.enum(["high", "medium", "low"]).describe("该情绪的强烈程度"),
+          residualTension: z.string().describe("尚未被满足/化解的心理诉求"),
+          transitionReadiness: z.string().describe("这种状态下观众适合被引导承接什么样的内容"),
+        })
+        .describe("观众（而非剧中角色/场景）看完结尾后的情绪状态，供桥接内容设计的心理落点参考"),
     })
     .describe("结尾状态，供后续 DirectorAgent 承接桥接广告使用"),
 });

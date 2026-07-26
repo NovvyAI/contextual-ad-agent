@@ -6,9 +6,8 @@ import path from "path";
 import u from "@/utils";
 import ResTool from "@/socket/resTool";
 import { revisePlan } from "@/agents/directorAgent";
-import { reviseDraftCut } from "@/agents/bridgeVideoAgent";
+import { reviseDraftCut } from "@/agents/videoGenAgent";
 import { revisePlayable } from "@/agents/playableAgent";
-import { reviseOverlay } from "@/agents/overlayAgent";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -41,7 +40,6 @@ function createTools(ctx: AgentContext) {
       planMsg.planCandidate({
         id: updated.id,
         adId: updated.adId,
-        formatSequence: updated.formatSequence,
         narrative: updated.narrative,
         tone: updated.tone,
         planEvaluatorScore: updated.planEvaluatorScore,
@@ -92,30 +90,10 @@ function createTools(ctx: AgentContext) {
     },
   });
 
-  const run_sub_agent_overlay_revise = tool({
-    description: "根据用户反馈重新生成 CTA 卡片，仅在用户针对某个具体 CTA 卡片 cut 提出修改意见时调用",
-    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
-    execute: async ({ bridgeCutId, feedback }) => {
-      const updated = await reviseOverlay(bridgeCutId, feedback);
-      const cardMsg = ctx.resTool.newMessage("assistant", "CTA 卡片");
-      cardMsg.contentCandidate({
-        bridgeCutId: updated.bridgeCutId,
-        type: "ctaCard",
-        previewUrl: updated.imageUrl,
-        ctaUrl: updated.config.ctaUrl,
-        evaluatorScore: updated.evaluation.overallScore,
-        evaluatorFeedback: updated.evaluation.feedback,
-      });
-      cardMsg.complete();
-      return `已根据反馈重新生成 CTA 卡片 ${bridgeCutId}，新的预览已推送给用户查看。`;
-    },
-  });
-
   return {
     run_sub_agent_director_plan_revise,
     run_sub_agent_bridge_video_revise,
     run_sub_agent_playable_revise,
-    run_sub_agent_overlay_revise,
   };
 }
 

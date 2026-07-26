@@ -18,7 +18,6 @@ export default router.post(
     const creativePlans = planRows.map((p: any) => ({
       id: p.id,
       adId: p.adId,
-      formatSequence: p.formatSequence ? JSON.parse(p.formatSequence) : [],
       narrative: p.narrative,
       tone: p.tone,
       planEvaluatorScore: p.planEvaluatorScore,

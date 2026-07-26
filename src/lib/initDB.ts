@@ -214,7 +214,6 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.increments("id");
         table.integer("episodeId").unsigned().references("id").inTable("ab_episode");
         table.integer("adId").unsigned().references("id").inTable("ab_ad");
-        table.text("formatSequence"); // JSON 数组，如 ["video","playableGame","ctaCard"]
         table.text("narrative");
         table.text("tone");
         table.integer("planEvaluatorScore");
@@ -229,7 +228,7 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.increments("id");
         table.integer("creativePlanId").unsigned().references("id").inTable("ab_creativePlan");
         table.integer("index");
-        table.text("type"); // video | playableGame | ctaCard
+        table.text("type"); // video | playableGame（ctaCard 是 M2-M6 时期的历史值，M7 起不再生成）
         table.text("scriptText");
         table.integer("durationMs");
         table.text("prompt");

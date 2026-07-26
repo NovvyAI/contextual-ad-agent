@@ -63,6 +63,7 @@ function handleSend(text: string) {
       :on-generate-plan="(adIds) => store.generatePlan(adIds)"
       :on-generate-content="(planId) => store.generateBridgeCuts(planId)"
       :on-confirm-bridge-cuts="(planId) => store.confirmBridgeCuts(planId)"
+      :on-assemble-playable="(planId) => store.assemblePlayableCut(planId)"
       :on-confirm-content="(planId) => store.confirmContent(planId)"
       :on-retry-bridge-cut="(cutId) => store.retryBridgeCut(cutId)"
     />

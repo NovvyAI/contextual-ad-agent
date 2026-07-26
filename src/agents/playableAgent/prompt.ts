@@ -10,7 +10,7 @@ export const SYSTEM_PROMPT =
 function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): string {
   return [
     `## Episode 结尾基调\n${episodeAnalysis.endingState.summary}（建议基调：${episodeAnalysis.endingState.suggestedTone}）`,
-    `## 广告信息\n产品：${ad.product.name}${ad.product.category ? `（${ad.product.category}）` : ""}\n核心卖点：${ad.product.keySellingPoints.join("、")}\n调性：${ad.tone}`,
+    `## 广告信息\n游戏：${ad.game.name}（${ad.game.genre}）\n核心玩法：${ad.game.coreMechanic}\n视觉风格：${ad.game.visualStyle}\n核心卖点：${ad.game.keySellingPoints.join("、")}\n调性：${ad.tone}`,
   ].join("\n\n");
 }
 

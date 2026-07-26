@@ -10,7 +10,6 @@ export interface CreativePlanRow {
   id: number;
   episodeId: number;
   adId: number;
-  formatSequence: string[];
   narrative: string;
   tone: string;
   planEvaluatorScore: number;
@@ -44,9 +43,6 @@ function rowFromPlanAndEvaluation(episodeId: number, plan: PlanDraft, evaluation
   return {
     episodeId,
     adId: plan.adId,
-    // DB 列/下游（SessionAgent、socket 协议）仍然按 formatSequence 数组消费，这里只是把单一 format
-    // 包成长度为 1 的数组存进去——既满足"结构上排除组合"（LLM 侧 schema 只产出单值），又不用动 M3 已经上线的代码。
-    formatSequence: JSON.stringify([plan.format]),
     narrative: plan.narrative,
     tone: plan.tone,
     planEvaluatorScore: overallScore,
@@ -54,10 +50,6 @@ function rowFromPlanAndEvaluation(episodeId: number, plan: PlanDraft, evaluation
     createTime: Date.now(),
     evaluatorFeedback,
   };
-}
-
-function toCreativePlanRow(row: any): CreativePlanRow {
-  return { ...row, formatSequence: JSON.parse(row.formatSequence) };
 }
 
 export async function generatePlans(episodeId: number, adIds: number[]): Promise<CreativePlanWithEvaluation[]> {
@@ -86,7 +78,7 @@ export async function generatePlans(episodeId: number, adIds: number[]): Promise
     const toInsert = rowFromPlanAndEvaluation(episodeId, generation.plans[i], evaluation.evaluations[i]);
     const { evaluatorFeedback, ...dbRow } = toInsert;
     const [id] = await u.db("ab_creativePlan").insert(dbRow);
-    results.push({ ...toCreativePlanRow({ ...dbRow, id }), evaluatorFeedback });
+    results.push({ ...dbRow, id, evaluatorFeedback });
   }
   return results;
 }
@@ -94,12 +86,11 @@ export async function generatePlans(episodeId: number, adIds: number[]): Promise
 export async function revisePlan(planId: number, feedback: string): Promise<CreativePlanWithEvaluation> {
   const row = await u.db("ab_creativePlan").where("id", planId).first();
   if (!row) throw new Error(`创意方案 ${planId} 不存在`);
-  if (row.episodeId == null || row.adId == null || row.formatSequence == null || row.narrative == null || row.tone == null) {
+  if (row.episodeId == null || row.adId == null || row.narrative == null || row.tone == null) {
     throw new Error(`创意方案 ${planId} 数据不完整`);
   }
   const episodeAnalysis = await loadEpisodeAnalysis(row.episodeId);
-  const storedFormats: string[] = JSON.parse(row.formatSequence);
-  const existingPlan: PlanDraft = { adId: row.adId, format: storedFormats[0] as PlanDraft["format"], narrative: row.narrative, tone: row.tone };
+  const existingPlan: PlanDraft = { adId: row.adId, narrative: row.narrative, tone: row.tone };
 
   const { object: revised } = await u.Ai.Text(MODEL_KEY).invokeObject({
     schema: planGenerationSchema.shape.plans.element,
@@ -115,5 +106,5 @@ export async function revisePlan(planId: number, feedback: string): Promise<Crea
 
   const { evaluatorFeedback, ...dbRow } = rowFromPlanAndEvaluation(row.episodeId, revised, evaluation.evaluations[0]);
   await u.db("ab_creativePlan").where("id", planId).update(dbRow);
-  return { ...toCreativePlanRow({ ...dbRow, id: planId }), evaluatorFeedback };
+  return { ...dbRow, id: planId, evaluatorFeedback };
 }

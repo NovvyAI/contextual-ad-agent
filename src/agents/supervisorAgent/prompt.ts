@@ -15,7 +15,7 @@ export const SYSTEM_PROMPT =
 function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): string {
   return [
     `## Episode 结尾状态\n${episodeAnalysis.endingState.summary}`,
-    `## 广告信息\n产品：${ad.product.name}${ad.product.category ? `（${ad.product.category}）` : ""}\n调性：${ad.tone}\n` +
+    `## 广告信息\n游戏：${ad.game.name}（${ad.game.genre}）\n调性：${ad.tone}\n` +
       `AdLibraryAgent 阶段的品牌安全评估：isSafe=${ad.brandSafety.isSafe}${ad.brandSafety.concerns.length ? `，关注点：${ad.brandSafety.concerns.join("、")}` : ""}`,
   ].join("\n\n");
 }

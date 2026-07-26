@@ -3,9 +3,8 @@ import u from "@/utils";
 import { Namespace, Socket } from "socket.io";
 import * as agent from "@/agents/sessionAgent";
 import * as state from "@/agents/sessionAgent/state";
-import * as bridgeVideoAgent from "@/agents/bridgeVideoAgent";
+import * as videoGenAgent from "@/agents/videoGenAgent";
 import * as playableAgent from "@/agents/playableAgent";
-import * as overlayAgent from "@/agents/overlayAgent";
 import * as supervisorAgent from "@/agents/supervisorAgent";
 import * as assembler from "@/agents/assembler";
 import ResTool from "@/socket/resTool";
@@ -45,10 +44,11 @@ export default (nsp: Namespace) => {
     const resTool = new ResTool(socket, { episodeId });
     let abortController: AbortController | null = null;
 
-    // 按 cut 类型派发到对应执行 Agent 并推卡片——bridgeCut:generate 首次生成、bridgeCut:retry 重试失败的 cut 共用
+    // 按 cut 类型派发到对应执行 Agent 并推卡片——bridgeCut:generate 首次生成、bridgeCut:retry 重试失败的 cut、
+    // bridgeCut:assemblePlayable 手动确认组装小游戏，三处共用
     async function generateCutContent(cut: { id: number; index: number; type: string }) {
       if (cut.type === "video") {
-        const result = await bridgeVideoAgent.generateDraftCut(cut.id);
+        const result = await videoGenAgent.generateDraftCut(cut.id);
         const msg = resTool.newMessage("assistant", "桥接视频");
         msg.storyboardCut({
           bridgeCutId: cut.id,
@@ -71,18 +71,6 @@ export default (nsp: Namespace) => {
           evaluatorFeedback: result.evaluation.feedback,
         });
         msg.complete();
-      } else if (cut.type === "ctaCard") {
-        const result = await overlayAgent.generateOverlay(cut.id);
-        const msg = resTool.newMessage("assistant", "CTA 卡片");
-        msg.contentCandidate({
-          bridgeCutId: cut.id,
-          type: "ctaCard",
-          previewUrl: result.imageUrl,
-          ctaUrl: result.config.ctaUrl,
-          evaluatorScore: result.evaluation.overallScore,
-          evaluatorFeedback: result.evaluation.feedback,
-        });
-        msg.complete();
       }
     }
 
@@ -95,7 +83,6 @@ export default (nsp: Namespace) => {
           msg.planCandidate({
             id: plan.id,
             adId: plan.adId,
-            formatSequence: plan.formatSequence,
             narrative: plan.narrative,
             tone: plan.tone,
             planEvaluatorScore: plan.planEvaluatorScore,
@@ -123,15 +110,17 @@ export default (nsp: Namespace) => {
       }
     });
 
-    // bridgeCut:generate —— 确定性代码，不经过 LLM。对已批准方案的 formatSequence 并行派发三个执行 Agent
+    // bridgeCut:generate —— 确定性代码，不经过 LLM。M7 起固定两段式：这里只生成 video 段的 Stage A 分镜草案，
+    // playableGame 段留到 video 成片渲染完、用户手动点「确认组装小游戏」才触发（见 bridgeCut:assemblePlayable）
     socket.on("bridgeCut:generate", async (data: { creativePlanId: number }) => {
       try {
         const cuts = await state.createBridgeCuts(episodeId, data.creativePlanId);
-        const results = await Promise.allSettled(cuts.map((cut) => generateCutContent(cut)));
+        const videoCuts = cuts.filter((cut) => cut.type === "video");
+        const results = await Promise.allSettled(videoCuts.map((cut) => generateCutContent(cut)));
         // allSettled 本身不会抛错，失败的 cut 在这里显式记日志+推给用户，避免静默吞掉；cut 状态已由各 Agent 自己的 catch 块置为 failed，可通过 bridgeCut:retry 重试
         results.forEach((result, i) => {
           if (result.status !== "rejected") return;
-          const cut = cuts[i];
+          const cut = videoCuts[i];
           console.error(`[sessionAgent] bridgeCut ${cut.id}（type=${cut.type}）生成失败:`, u.error(result.reason).message);
           const msg = resTool.newMessage("assistant");
           msg.error(`cut ${cut.id}（${cut.type}）生成失败：${u.error(result.reason).message}，可点击重试`);
@@ -158,7 +147,7 @@ export default (nsp: Namespace) => {
 
         if (confirmedDraft) {
           await u.db("ab_bridgeCut").where("id", data.bridgeCutId).update({ status: "draftConfirmed" });
-          const result = await bridgeVideoAgent.renderStageB(data.bridgeCutId);
+          const result = await videoGenAgent.renderStageB(data.bridgeCutId);
           const msg = resTool.newMessage("assistant", "桥接视频");
           msg.videoCandidate({
             bridgeCutId: data.bridgeCutId,
@@ -181,7 +170,7 @@ export default (nsp: Namespace) => {
     socket.on("bridgeCut:confirm", async (data: { creativePlanId: number }) => {
       const msg = resTool.newMessage("assistant");
       try {
-        await bridgeVideoAgent.confirmAllCuts(data.creativePlanId);
+        await videoGenAgent.confirmAllCuts(data.creativePlanId);
         const text = msg.text("已确认全部分镜草案，开始渲染成片。");
         text.complete();
         msg.complete();
@@ -189,7 +178,7 @@ export default (nsp: Namespace) => {
         const videoCuts = await u.db("ab_bridgeCut").where("creativePlanId", data.creativePlanId).where("type", "video");
         const results = await Promise.allSettled(
           videoCuts.map(async (cut: any) => {
-            const result = await bridgeVideoAgent.renderStageB(cut.id);
+            const result = await videoGenAgent.renderStageB(cut.id);
             const renderMsg = resTool.newMessage("assistant", "桥接视频");
             renderMsg.videoCandidate({
               bridgeCutId: cut.id,
@@ -210,6 +199,36 @@ export default (nsp: Namespace) => {
           const errMsg = resTool.newMessage("assistant");
           errMsg.error(`cut ${cut.id}（成片渲染）失败：${u.error(result.reason).message}，可点击重试`);
         });
+      } catch (err) {
+        msg.error(u.error(err).message);
+      }
+    });
+
+    // bridgeCut:assemblePlayable —— 确定性代码，不经过 LLM。M7 新增的手动确认点：video 段成片渲染完之后，
+    // 不自动直通组装小游戏，等用户主动点击才触发，校验 video 段状态后派发 playableGame 段生成
+    socket.on("bridgeCut:assemblePlayable", async (data: { creativePlanId: number }) => {
+      const msg = resTool.newMessage("assistant");
+      try {
+        const cuts = await u.db("ab_bridgeCut").where("creativePlanId", data.creativePlanId);
+        const videoCut = cuts.find((c: any) => c.type === "video");
+        const gameCut = cuts.find((c: any) => c.type === "playableGame");
+        if (!videoCut) throw new Error(`创意方案 ${data.creativePlanId} 缺少 video cut`);
+        if (videoCut.status !== "done") throw new Error(`桥接视频 cut ${videoCut.id} 当前状态是 ${videoCut.status}，还没渲染完成，不能组装小游戏`);
+        if (!gameCut || gameCut.id == null) throw new Error(`创意方案 ${data.creativePlanId} 缺少 playableGame cut`);
+        if (gameCut.status !== "pending") throw new Error(`小游戏 cut ${gameCut.id} 当前状态是 ${gameCut.status}，不是 pending，不能重复组装`);
+
+        const text = msg.text("已确认组装小游戏，开始生成。");
+        text.complete();
+        msg.complete();
+
+        try {
+          await generateCutContent({ id: gameCut.id, index: gameCut.index ?? 0, type: "playableGame" });
+        } catch (genErr) {
+          // 同 bridgeCut:confirm 的教训：失败必须显式记日志+推给用户，不能静默消失
+          console.error(`[sessionAgent] bridgeCut ${gameCut.id}（playableGame）组装失败:`, u.error(genErr).message);
+          const errMsg = resTool.newMessage("assistant");
+          errMsg.error(`小游戏组装失败：${u.error(genErr).message}，可点击重试`);
+        }
       } catch (err) {
         msg.error(u.error(err).message);
       }

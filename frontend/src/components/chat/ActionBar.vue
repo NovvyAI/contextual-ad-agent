@@ -9,6 +9,7 @@ const props = defineProps<{
   onGeneratePlan: (adIds: number[]) => void;
   onGenerateContent: (creativePlanId: number) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
+  onAssemblePlayable: (creativePlanId: number) => void;
   onConfirmContent: (creativePlanId: number) => void;
   onRetryBridgeCut: (bridgeCutId: number) => void;
 }>();
@@ -19,6 +20,9 @@ const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) =>
 const videoCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.type === "video"));
 const hasCuts = computed(() => props.sessionState.bridgeCuts.length > 0);
 const videoDraftsReadyToConfirm = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "draft"));
+const gameCut = computed(() => props.sessionState.bridgeCuts.find((c) => c.type === "playableGame"));
+// M7 新增的手动确认点：video 段渲染完成、小游戏段还没组装过时，才显示「确认组装小游戏」按钮，不自动直通
+const readyToAssemblePlayable = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "done") && gameCut.value?.status === "pending");
 const allCutsDone = computed(() => hasCuts.value && props.sessionState.bridgeCuts.every((c) => c.status === "done"));
 const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.status === "failed"));
 </script>
@@ -46,6 +50,9 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
       </template>
       <t-button v-else-if="approvedPlan && videoDraftsReadyToConfirm" theme="primary" :disabled="busy" @click="onConfirmBridgeCuts(approvedPlan.id)">
         确认分镜草案，开始渲染成片
+      </t-button>
+      <t-button v-else-if="approvedPlan && readyToAssemblePlayable" theme="primary" :disabled="busy" @click="onAssemblePlayable(approvedPlan.id)">
+        确认组装小游戏
       </t-button>
       <t-button v-else-if="approvedPlan && allCutsDone" theme="primary" :disabled="busy" @click="onConfirmContent(approvedPlan.id)">确认内容，进入终审与落地</t-button>
       <span v-else style="color: var(--td-text-color-secondary, #666)">内容生成中...</span>

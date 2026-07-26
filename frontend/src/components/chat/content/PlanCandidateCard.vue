@@ -5,7 +5,6 @@ import useSessionAgentStore from "@/stores/sessionAgent";
 
 const props = defineProps<{ content: PlanCandidateContent; episodeId: number }>();
 
-const formatLabel: Record<string, string> = { video: "桥接视频", playableGame: "H5 小游戏", ctaCard: "CTA 卡片" };
 const statusLabel: Record<string, string> = { draft: "待确认", approved: "已确认", rejected: "已否决" };
 const statusTheme: Record<string, "default" | "success" | "danger"> = { draft: "default", approved: "success", rejected: "danger" };
 
@@ -22,7 +21,7 @@ function handleApprove() {
       <t-tag :theme="statusTheme[content.data.status]" variant="light">{{ statusLabel[content.data.status] ?? content.data.status }}</t-tag>
     </template>
     <t-space direction="vertical" style="width: 100%">
-      <div><b>形式：</b>{{ content.data.formatSequence.map((f) => formatLabel[f] ?? f).join("、") }}</div>
+      <div><b>形式：</b>过渡视频 + H5 小游戏</div>
       <div><b>基调：</b>{{ content.data.tone }}</div>
       <div><b>创意构思：</b>{{ content.data.narrative }}</div>
       <div><b>参考分：</b>{{ content.data.planEvaluatorScore }}</div>

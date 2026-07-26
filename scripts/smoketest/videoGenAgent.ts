@@ -1,5 +1,5 @@
 import u from "@/utils";
-import { generateDraftCut, reviseDraftCut, confirmAllCuts, renderStageB } from "@/agents/bridgeVideoAgent";
+import { generateDraftCut, reviseDraftCut, confirmAllCuts, renderStageB } from "@/agents/videoGenAgent";
 
 (async () => {
   // 复用 M2 smoketest 留下的已批准方案（id=4, episodeId=3, formatSequence=["video","ctaCard"]）
@@ -49,8 +49,8 @@ import { generateDraftCut, reviseDraftCut, confirmAllCuts, renderStageB } from "
   const finalSegment = await u.db("ab_generatedSegment").where("bridgeCutId", cutId).where("stage", "finalRender").where("isSelected", 1).first();
   if (!finalSegment) throw new Error("缺少 stage=finalRender isSelected=1 的 segment");
 
-  console.log("\n✅ bridgeVideoAgent smoketest 通过");
+  console.log("\n✅ videoGenAgent smoketest 通过");
 })().catch((err) => {
-  console.error("❌ bridgeVideoAgent smoketest 失败:", err);
+  console.error("❌ videoGenAgent smoketest 失败:", err);
   process.exit(1);
 });

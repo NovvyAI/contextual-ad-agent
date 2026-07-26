@@ -7,7 +7,7 @@ import { transcribeSegments, type AsrSegment } from "@/utils/asr";
 import { adAnalysisSchema, type AdEntry } from "./schema";
 
 const SYSTEM_PROMPT =
-  "你是广告素材分析助手。你会收到一条广告素材（视频抽帧+台词转写、单张图片、或纯文字文案），" +
+  "你是广告素材分析助手。你会收到一条游戏广告素材（游戏演示视频抽帧+台词转写、游戏截图、或游戏介绍文案），" +
   "需要据此产出结构化的广告分析，供后续挑选广告、构思创意桥接方案使用。";
 
 function formatTranscript(segments: AsrSegment[]): string {
@@ -62,7 +62,7 @@ export async function analyzeAd(adId: number): Promise<void> {
       content.push({ type: "text", text: `## 广告文案\n${ad.textContent.slice(0, 2000)}` });
     }
 
-    content.push({ type: "text", text: "请分析这条广告素材的调性、产品信息、品牌安全性和内容摘要。" });
+    content.push({ type: "text", text: "请分析这条广告素材的调性、游戏信息、品牌安全性和内容摘要。" });
 
     const messages: ModelMessage[] = [{ role: "user", content }];
 

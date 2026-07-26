@@ -14,7 +14,6 @@ import { generatePlans, revisePlan } from "@/agents/directorAgent";
   if (plans.length !== adIds.length) throw new Error(`预期 ${adIds.length} 份方案，实际 ${plans.length}`);
   for (const plan of plans) {
     if (plan.status !== "draft") throw new Error(`方案 ${plan.id} 状态应为 draft，实际 ${plan.status}`);
-    if (!Array.isArray(plan.formatSequence) || plan.formatSequence.length === 0) throw new Error(`方案 ${plan.id} formatSequence 为空`);
     if (plan.planEvaluatorScore < 0 || plan.planEvaluatorScore > 100) throw new Error(`方案 ${plan.id} 评分超出范围: ${plan.planEvaluatorScore}`);
     if (!adIds.includes(plan.adId)) throw new Error(`方案 ${plan.id} adId=${plan.adId} 不在候选列表里`);
   }
@@ -27,7 +26,7 @@ import { generatePlans, revisePlan } from "@/agents/directorAgent";
 
   console.log("\n对第一份方案发起 revise...");
   const target = plans[0];
-  const feedback = "把这份方案的形式换成纯 CTA 卡片，语气再轻松一点";
+  const feedback = "语气再轻松一点，卖点强调得再明显一点";
   const revised = await revisePlan(target.id, feedback);
   console.log("revise 后的方案:", JSON.stringify(revised, null, 2));
 
