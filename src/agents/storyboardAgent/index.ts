@@ -1,9 +1,10 @@
+import fs from "fs";
 import path from "path";
 import u from "@/utils";
 import { sampleFrames, extractTail, hasAudio, extractAudioToWav, probeDuration } from "@/utils/video";
 import { transcribeSegments } from "@/utils/asr";
 import { episodeAnalysisSchema } from "./schema";
-import { buildEpisodeAnalysisMessages, EPISODE_ANALYSIS_SYSTEM_PROMPT } from "./prompt";
+import { buildEpisodeAnalysisMessages } from "./prompt";
 
 const TAIL_SECONDS = 10.0;
 
@@ -34,9 +35,10 @@ export async function analyzeEpisode(episodeId: number): Promise<void> {
     }
 
     const messages = buildEpisodeAnalysisMessages(fullFrames, tailFrames, segments);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "storyboard_agent.md"), "utf-8");
     const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject({
       schema: episodeAnalysisSchema,
-      system: EPISODE_ANALYSIS_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages,
     });
 

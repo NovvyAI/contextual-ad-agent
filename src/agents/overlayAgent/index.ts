@@ -1,7 +1,9 @@
+import fs from "fs";
+import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { overlayConfigSchema, overlayEvaluationSchema, type OverlayConfig, type OverlayEvaluation } from "./schema";
-import { SYSTEM_PROMPT, buildGenerateMessages, buildReviseMessages, buildEvaluationMessages } from "./prompt";
+import { buildGenerateMessages, buildReviseMessages, buildEvaluationMessages } from "./prompt";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-1";
@@ -14,10 +16,11 @@ export interface OverlayResult {
 }
 
 async function evaluate(bridgeCutId: number, episodeId: number, config: OverlayConfig): Promise<OverlayEvaluation> {
+  const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "overlay_agent.md"), "utf-8");
   const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
     {
       schema: overlayEvaluationSchema,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: buildEvaluationMessages(config),
     },
     { taskClass: "overlay-evaluate", describe: `Cut ${bridgeCutId} CTA 卡片评估`, relatedObjects: String(bridgeCutId), projectId: episodeId },
@@ -60,10 +63,11 @@ export async function generateOverlay(bridgeCutId: number): Promise<OverlayResul
 
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "overlay_agent.md"), "utf-8");
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: overlayConfigSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildGenerateMessages(episodeAnalysis, ad),
       },
       { taskClass: "overlay-generateText", describe: `Cut ${bridgeCutId} CTA 卡片配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
@@ -85,11 +89,12 @@ export async function reviseOverlay(bridgeCutId: number, feedback: string): Prom
 
   try {
     const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "overlay_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as OverlayConfig;
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: overlayConfigSchema,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
       },
       { taskClass: "overlay-reviseText", describe: `Cut ${bridgeCutId} CTA 卡片配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },

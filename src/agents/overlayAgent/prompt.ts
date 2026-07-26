@@ -3,10 +3,6 @@ import type { EpisodeAnalysis } from "@/agents/storyboardAgent/schema";
 import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import type { OverlayConfig } from "./schema";
 
-export const SYSTEM_PROMPT =
-  "你负责给短剧结尾生成一张静态的 CTA 卡片（商品图 + 文案 + 跳转按钮），在 Episode 播完后展示。" +
-  "卡片要简洁、不喧宾夺主，文案要体现广告的核心卖点，产品图 prompt 要能直接喂给图片生成模型。";
-
 function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): string {
   return [
     `## Episode 结尾基调\n${episodeAnalysis.endingState.summary}（建议基调：${episodeAnalysis.endingState.suggestedTone}）`,

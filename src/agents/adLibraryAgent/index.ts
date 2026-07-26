@@ -6,10 +6,6 @@ import { sampleFrames, hasAudio, extractAudioToWav } from "@/utils/video";
 import { transcribeSegments, type AsrSegment } from "@/utils/asr";
 import { adAnalysisSchema, type AdEntry } from "./schema";
 
-const SYSTEM_PROMPT =
-  "你是广告素材分析助手。你会收到一条广告素材（视频抽帧+台词转写、单张图片、或纯文字文案），" +
-  "需要据此产出结构化的广告分析，供后续挑选广告、构思创意桥接方案使用。";
-
 function formatTranscript(segments: AsrSegment[]): string {
   if (segments.length === 0) return "(No speech detected)";
   return segments.map((s) => `[${s.start.toFixed(1)}s - ${s.end.toFixed(1)}s] ${s.text}`).join("\n");
@@ -66,9 +62,10 @@ export async function analyzeAd(adId: number): Promise<void> {
 
     const messages: ModelMessage[] = [{ role: "user", content }];
 
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "ad_library_agent.md"), "utf-8");
     const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject({
       schema: adAnalysisSchema,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages,
     });
 

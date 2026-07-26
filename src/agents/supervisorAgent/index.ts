@@ -3,7 +3,7 @@ import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { supervisionResultSchema, type SupervisionResult } from "./schema";
-import { SYSTEM_PROMPT, buildSupervisionMessages } from "./prompt";
+import { buildSupervisionMessages } from "./prompt";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -72,8 +72,9 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
     imageRelPath ? resolveOssPath(imageRelPath) : null,
   );
 
+  const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "supervisor_agent.md"), "utf-8");
   const { object } = await u.Ai.Text(MODEL_KEY).invokeObject(
-    { schema: supervisionResultSchema, system: SYSTEM_PROMPT, messages },
+    { schema: supervisionResultSchema, system: systemPrompt, messages },
     { taskClass: "supervision", describe: `Episode ${episodeId} cut ${bridgeCutId} 落地终审`, relatedObjects: String(bridgeCutId), projectId: episodeId },
   );
 
