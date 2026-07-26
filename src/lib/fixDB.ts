@@ -31,6 +31,33 @@ export default async (knex: Knex): Promise<void> => {
       });
     }
   };
+
+  /**
+   * 把一张普通 integer 主键的表迁移成 AUTOINCREMENT（SQLite 不支持 ALTER TABLE 直接改主键类型，
+   * 只能建一张新表 + 搬数据 + 删旧表 + 改名）。用 sqlite_master 里的建表 SQL 判断是否已经迁移过，
+   * 迁移过就跳过，保证这个函数在每次启动时调用都是幂等的。
+   */
+  const convertToAutoIncrement = async (table: string, builder: (t: Knex.CreateTableBuilder) => void) => {
+    if (!(await knex.schema.hasTable(table))) return;
+    const meta = await knex("sqlite_master").where({ type: "table", name: table }).first();
+    if (meta?.sql && /autoincrement/i.test(meta.sql)) return;
+
+    const columns = Object.keys(await knex(table).columnInfo());
+    const tempTable = `${table}__migrating`;
+    if (await knex.schema.hasTable(tempTable)) await knex.schema.dropTable(tempTable);
+
+    await knex.raw("PRAGMA foreign_keys = OFF");
+    try {
+      await knex.schema.createTable(tempTable, builder);
+      const columnList = columns.map((c) => `\`${c}\``).join(", ");
+      await knex.raw(`INSERT INTO \`${tempTable}\` (${columnList}) SELECT ${columnList} FROM \`${table}\``);
+      await knex.schema.dropTable(table);
+      await knex.schema.renameTable(tempTable, table);
+      console.log("[数据库迁移] 已迁移为 AUTOINCREMENT:", table);
+    } finally {
+      await knex.raw("PRAGMA foreign_keys = ON");
+    }
+  };
   // M1: StoryboardAgent / AdLibraryAgent 的结构化分析结果，存成 JSON blob 列
   await addColumn("ab_episode", "episodeAnalysis", "text");
   await addColumn("ab_ad", "textContent", "text");
@@ -49,6 +76,74 @@ export default async (knex: Knex): Promise<void> => {
   await addColumn("ab_generatedSegment", "stage", "text");
   // M6: 联调验收阶段要做分阶段耗时统计，o_tasks 补一列毫秒级耗时（taskRecord.ts 的 done() 里写入）
   await addColumn("o_tasks", "durationMs", "integer");
+  // 加了删除功能之后才暴露的问题：普通 integer 主键删除后号码会被回收复用，新记录可能撞上刚删掉的
+  // 旧记录的 id，导致前端按 id 缓存的会话状态串号、显示已删除数据。这几张业务表全部迁移成 AUTOINCREMENT，
+  // 删过的 id 永不复用。builder 要和 initDB.ts 里对应表的最终定义保持一致。
+  await convertToAutoIncrement("ab_episode", (t) => {
+    t.increments("id");
+    t.text("title");
+    t.text("sourceFilePath");
+    t.integer("durationMs");
+    t.text("status");
+    t.text("errorReason");
+    t.integer("createTime");
+    t.text("episodeAnalysis");
+    t.text("workflowStage");
+  });
+  await convertToAutoIncrement("ab_ad", (t) => {
+    t.increments("id");
+    t.text("name");
+    t.text("sourceFilePath");
+    t.text("adType");
+    t.text("brandName");
+    t.text("status");
+    t.integer("createTime");
+    t.text("textContent");
+    t.text("analysisResult");
+    t.text("errorReason");
+  });
+  await convertToAutoIncrement("ab_creativePlan", (t) => {
+    t.increments("id");
+    t.integer("episodeId").unsigned().references("id").inTable("ab_episode");
+    t.integer("adId").unsigned().references("id").inTable("ab_ad");
+    t.text("formatSequence");
+    t.text("narrative");
+    t.text("tone");
+    t.integer("planEvaluatorScore");
+    t.text("status");
+    t.integer("createTime");
+  });
+  await convertToAutoIncrement("ab_bridgeCut", (t) => {
+    t.increments("id");
+    t.integer("creativePlanId").unsigned().references("id").inTable("ab_creativePlan");
+    t.integer("index");
+    t.text("type");
+    t.text("scriptText");
+    t.integer("durationMs");
+    t.text("prompt");
+    t.text("status");
+    t.integer("createTime");
+  });
+  await convertToAutoIncrement("ab_generatedSegment", (t) => {
+    t.increments("id");
+    t.integer("bridgeCutId").unsigned().references("id").inTable("ab_bridgeCut");
+    t.text("model");
+    t.text("filePath");
+    t.text("state");
+    t.text("errorReason");
+    t.integer("createTime");
+    t.integer("isSelected");
+    t.text("stage");
+  });
+  await convertToAutoIncrement("ab_manifest", (t) => {
+    t.increments("id");
+    t.integer("episodeId").unsigned().references("id").inTable("ab_episode");
+    t.integer("creativePlanId").unsigned().references("id").inTable("ab_creativePlan");
+    t.text("finalFilePath");
+    t.text("manifestJson");
+    t.text("status");
+    t.integer("createTime");
+  });
   void dropColumn;
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，

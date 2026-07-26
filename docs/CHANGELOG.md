@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-25 业务表 id 迁移成 AUTOINCREMENT，修复删除后 id 复用导致的串号
+
+**触发原因**：用户删除一个 Episode 后新建一个，进入会话发现里面显示的是旧 Episode 早就失败的 bridgeCut/creativePlan 数据，随后生成创意方案时还报了一次 `FOREIGN KEY constraint failed`。排查确认：`ab_episode` 等业务表的 `id` 只是普通 `integer` 主键，没有声明 `AUTOINCREMENT`——SQLite 对这种主键的默认行为是"删除后号码可以被回收"，新建的 Episode 恰好复用了刚删掉的旧 Episode 的 id，导致前端按 id 缓存的会话状态（Pinia store）和后端在某个时间窗口内对不上号。这是加了删除功能（M6 之后新增）才第一次暴露出来的问题，此前项目里从来没有删除过任何数据，id 从未被复用过。
+
+**改了什么**：`ab_episode`/`ab_ad`/`ab_creativePlan`/`ab_bridgeCut`/`ab_generatedSegment`/`ab_manifest` 六张有删除功能牵连到的表，`id` 列全部从"`integer` + `primary`/`unique`"改成 `increments()`（即 `AUTOINCREMENT`）。`src/lib/initDB.ts` 改的是新装库的建表定义；`src/lib/fixDB.ts` 新增 `convertToAutoIncrement()` 辅助函数，对已有的活库做迁移——建一张同结构的临时表（关掉 `PRAGMA foreign_keys` 避免搬数据时报外键错）、把原表数据原样搬过去（显式指定 `id` 搬运，不是重新生成，所以所有已有的 id 值和外键引用完全不变）、删掉原表、把临时表改名回原名。用 `sqlite_master` 里的建表 SQL 判断表是否已经迁移过，保证这个函数每次启动调用都是幂等的，不会重复迁移。
+
+**验证**：迁移前先手动备份了一份 `db2.sqlite`。跑迁移后核对了迁移前后六张表的行数完全一致（没有丢数据），抽查了几条 `ab_creativePlan`/`ab_episode` 的外键关联和具体字段内容，确认数据没有损坏；查 `sqlite_sequence` 表确认六张表的自增序号都正确初始化成了各自当前的最大 id。然后真实做了一次"删除 Episode → 新建 Episode"，确认新 Episode 拿到的是全新的 id（19），不是被删掉的那个 id（18）——问题复现场景验证通过。`npx tsc --noEmit` 通过。
+
+---
+
 ## 2026-07-25 修复 bridgeCut:confirm 静默吞掉 Stage B 渲染失败
 
 **触发原因**：用户反馈"已确认全部分镜草案，开始渲染成片"一直卡在"内容生成中..."。排查发现不是真的卡住——Seedance 已经真实失败了两次（各耗时 30~40 秒），报错是 `InputImageSensitiveContentDetected.PrivacyInformation`（判定分镜草案图"可能包含真人"，拒绝拿它做图生视频，供应商内容安全限制，不是服务故障）。但 `bridgeCut:confirm` 这个 socket 处理器和 M6 修复前的 `bridgeCut:generate` 犯了同一个错——`Promise.allSettled` 的结果从没被检查过，Stage B 失败后前端完全收不到任何消息，界面永远卡在"生成中"，用户既不知道失败了、也没法重试。

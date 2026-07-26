@@ -179,40 +179,39 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
     // ── contextual-ad-agent 业务表 ──
 
     // Episode（被分析的短剧单集）
+    // id 用 increments（AUTOINCREMENT）而不是普通 integer 主键——这几张业务表都有删除功能，
+    // 普通 integer 主键删除后号码会被回收复用，新记录可能撞上刚删掉的旧记录的 id，
+    // 导致前端按 id 缓存的会话状态串号、显示已删除数据（真实踩过的坑，见 docs/CHANGELOG.md）。
     {
       name: "ab_episode",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.text("title");
         table.text("sourceFilePath");
         table.integer("durationMs");
         table.text("status"); // uploaded | analyzing | analyzed | failed
         table.text("errorReason");
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
     // 广告素材
     {
       name: "ab_ad",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.text("name");
         table.text("sourceFilePath");
         table.text("adType"); // video | image | copy
         table.text("brandName");
         table.text("status");
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
     // 创意方案（DirectorAgent 产出，可能是多种形式的混合脚本）
     {
       name: "ab_creativePlan",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.integer("episodeId").unsigned().references("id").inTable("ab_episode");
         table.integer("adId").unsigned().references("id").inTable("ab_ad");
         table.text("formatSequence"); // JSON 数组，如 ["video","playableGame","ctaCard"]
@@ -221,15 +220,13 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("planEvaluatorScore");
         table.text("status"); // draft | evaluating | approved | rejected
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
     // 分镜草案（已确认方案内的具体分镜/桥接段）
     {
       name: "ab_bridgeCut",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.integer("creativePlanId").unsigned().references("id").inTable("ab_creativePlan");
         table.integer("index");
         table.text("type"); // video | playableGame | ctaCard
@@ -238,38 +235,32 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.text("prompt");
         table.text("status");
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
     // 生成产出（针对某个分镜草案的实际生成结果，如渲染出的视频）
     {
       name: "ab_generatedSegment",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.integer("bridgeCutId").unsigned().references("id").inTable("ab_bridgeCut");
         table.text("model");
         table.text("filePath");
         table.text("state"); // pending | generating | done | failed
         table.text("errorReason");
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
     // 最终拼接输出
     {
       name: "ab_manifest",
       builder: (table) => {
-        table.integer("id").notNullable();
+        table.increments("id");
         table.integer("episodeId").unsigned().references("id").inTable("ab_episode");
         table.integer("creativePlanId").unsigned().references("id").inTable("ab_creativePlan");
         table.text("finalFilePath");
         table.text("manifestJson");
         table.text("status");
         table.integer("createTime");
-        table.primary(["id"]);
-        table.unique(["id"]);
       },
     },
   ];
