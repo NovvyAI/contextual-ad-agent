@@ -153,6 +153,45 @@ const DEFAULT_ANTHROPIC_PROVIDER_OPTIONS = {
   anthropic: { thinking: { type: "disabled" as const }, structuredOutputMode: "jsonTool" as const },
 };
 
+// ============ 大模型调用日志：每次调用都把输入输出打印到 terminal，非文本内容（图片/视频/音频）只打印摘要 ============
+function isBinaryLike(value: unknown): value is Buffer | Uint8Array {
+  return Buffer.isBuffer(value) || value instanceof Uint8Array;
+}
+
+const DATA_URI_RE = /^data:([\w./+-]+);base64,/i;
+
+function looksLikeBase64(value: string): boolean {
+  const withoutPrefix = value.replace(DATA_URI_RE, "");
+  return withoutPrefix.length > 200 && /^[A-Za-z0-9+/_-]+={0,2}$/.test(withoutPrefix.slice(0, 120));
+}
+
+/** 递归地把请求/响应对象里的二进制数据（Buffer/base64 字符串，含 data: URI 形式）替换成简短描述，其余字段原样保留 */
+function summarizeForLog(value: any, keyHint?: string): any {
+  if (value == null) return value;
+  if (isBinaryLike(value)) return `[二进制数据，约 ${(value as Buffer).length} 字节]`;
+  if (typeof value === "string") {
+    const dataUriMatch = value.match(DATA_URI_RE);
+    if (dataUriMatch || looksLikeBase64(value)) {
+      const mediaType = dataUriMatch?.[1] ?? "";
+      const kind = /audio/i.test(mediaType || keyHint || "") ? "音频" : /video/i.test(mediaType || keyHint || "") ? "视频" : "图片";
+      return `[${kind} base64 数据，约 ${value.length} 字符]`;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => summarizeForLog(v));
+  if (typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = summarizeForLog(v, k);
+    return out;
+  }
+  return value;
+}
+
+function logModelCall(label: string, modelName: string, phase: "输入" | "输出", data: unknown) {
+  console.log(`\n[大模型调用] ${label} | model=${modelName} | ${phase}:`);
+  console.log(JSON.stringify(summarizeForLog(data), null, 2));
+}
+
 class AiText {
   private AiType: AiType | `${string}:${string}`;
   private think?: boolean;
@@ -175,8 +214,10 @@ class AiText {
   }
   async invoke(input: Omit<Parameters<typeof generateText>[0], "model">) {
     const config = await getModelConfig(this.AiType);
+    const modelName = await resolveModelName(this.AiType);
+    logModelCall("Text.invoke", modelName, "输入", { system: input.system, messages: input.messages, tools: input.tools ? Object.keys(input.tools) : undefined });
 
-    return generateText({
+    const result = await generateText({
       ...(input.tools && { stopWhen: stepCountIs(Object.keys(input.tools).length * 50) }),
       providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
       ...input,
@@ -184,6 +225,9 @@ class AiText {
       ...(config?.temperature && { temperature: config.temperature }),
       ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
     } as Parameters<typeof generateText>[0]);
+
+    logModelCall("Text.invoke", modelName, "输出", { text: result.text, toolCalls: result.toolCalls });
+    return result;
   }
   /**
    * 结构化输出：内部走 generateObject（对 Anthropic 是强制走 tool-calling 拿结构化结果），
@@ -195,14 +239,19 @@ class AiText {
     taskRecord?: TaskRecord,
   ) {
     const config = await getModelConfig(this.AiType);
-    const exec = async () =>
-      generateObject({
+    const modelName = await resolveModelName(this.AiType);
+    const exec = async () => {
+      logModelCall("Text.invokeObject", modelName, "输入", { system: input.system, messages: input.messages });
+      const result = (await generateObject({
         providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
         ...input,
         model: await this.resolveModel(),
         ...(config?.temperature && { temperature: config.temperature }),
         ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
-      } as Parameters<typeof generateObject>[0]) as Promise<{ object: T } & Record<string, any>>;
+      } as Parameters<typeof generateObject>[0])) as { object: T } & Record<string, any>;
+      logModelCall("Text.invokeObject", modelName, "输出", { object: result.object });
+      return result;
+    };
 
     if (taskRecord) {
       return withTaskRecord(this.AiType, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
@@ -211,8 +260,10 @@ class AiText {
   }
   async stream(input: Omit<Parameters<typeof streamText>[0], "model">) {
     const config = await getModelConfig(this.AiType);
+    const modelName = await resolveModelName(this.AiType);
+    logModelCall("Text.stream", modelName, "输入", { system: input.system, messages: input.messages, tools: input.tools ? Object.keys(input.tools) : undefined });
 
-    return streamText({
+    const result = streamText({
       ...(input.tools && { stopWhen: stepCountIs(Object.keys(input.tools).length * 50) }),
       providerOptions: DEFAULT_ANTHROPIC_PROVIDER_OPTIONS,
       ...input,
@@ -220,6 +271,23 @@ class AiText {
       ...(config?.temperature && { temperature: config.temperature }),
       ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
     } as Parameters<typeof streamText>[0]);
+
+    // 流式调用拿不到一次性的"输出"，用一个透传的 async generator 包一层 fullStream：
+    // 逐块转发给调用方的同时累积文本，等流真正消费完（或提前中断/报错）再打印一次完整输出
+    const originalFullStream = result.fullStream;
+    const wrappedFullStream = (async function* () {
+      let accumulated = "";
+      try {
+        for await (const chunk of originalFullStream) {
+          if ((chunk as any).type === "text-delta") accumulated += (chunk as any).text ?? "";
+          yield chunk;
+        }
+      } finally {
+        logModelCall("Text.stream", modelName, "输出", { text: accumulated });
+      }
+    })();
+
+    return { ...result, fullStream: wrappedFullStream } as unknown as typeof result;
   }
 }
 
@@ -258,10 +326,12 @@ class AiImage {
   async run(input: ImageConfig, taskRecord?: TaskRecord) {
     const modelName = await resolveModelName(this.key);
     const exec = async (mn: `${string}:${string}`) => {
+      logModelCall("Image.run", mn, "输入", input);
       const fn = await getVendorTemplateFn("imageRequest", mn);
       await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
       this.result = await fn(input);
       if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
+      logModelCall("Image.run", mn, "输出", { imageResult: this.result });
       return this;
     };
     if (taskRecord) {
@@ -305,12 +375,14 @@ class AiVideo {
     const modelName = await resolveModelName(this.key);
     try {
       const exec = async (mn: `${string}:${string}`) => {
+        logModelCall("Video.run", mn, "输入", input);
         const fn = await getVendorTemplateFn("videoRequest", mn);
         await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
 
         this.result = await fn(input);
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
+        logModelCall("Video.run", mn, "输出", { videoResult: this.result });
       };
       if (taskRecord) {
         await withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
@@ -337,11 +409,13 @@ class AiAudio {
     const modelName = await resolveModelName(this.key);
     const exec = async (mn: `${string}:${string}`) => {
       try {
+        logModelCall("Audio.run", mn, "输入", input);
         const fn = await getVendorTemplateFn("ttsRequest", mn);
         await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
         this.result = await fn(input);
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
+        logModelCall("Audio.run", mn, "输出", { audioResult: this.result });
         return this;
       } catch (e) {}
     };
