@@ -12,6 +12,18 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-26 统一的大模型调用输入输出日志
+
+**用户意见**：每次项目调用大模型的时候，输入输出都要用 log 打印到 terminal 上；如果输入输出是非文本（图片/视频/音频），只需要简单概述一下内容，不用打印原始数据。
+
+**改了什么**：排查发现现有的 `o_tasks` 表只有部分 Agent（VideoGenAgent/PlayableAgent/SupervisorAgent）主动传了 `taskRecord` 才会记一条，且只记任务元数据（分类/耗时/成功失败），不含完整输入输出；另有一个默认关闭的 AI SDK DevTools 开关，只覆盖文本类调用且是调试工具不是持久化日志。这次直接在统一的模型调用入口 `src/utils/ai.ts` 里加日志，覆盖全部四种调用（`AiText.invoke/invokeObject/stream`、`AiImage.run`、`AiVideo.run`、`AiAudio.run`），不依赖调用方是否传了 `taskRecord`。新增 `summarizeForLog()` 递归遍历请求/响应对象，把 Buffer/Uint8Array 和 base64 字符串（含 `data:image/png;base64,...` 这种带前缀的形式）替换成"[图片/视频/音频 base64 数据，约 N 字符]"这样的简短描述，根据 key 名称或 data URI 的 mediaType 判断是图片/视频/音频，其余字段（system/messages/prompt 等文本内容）原样打印。`invoke`/`invokeObject` 是同步的一次性调用，直接在调用前后各打一次日志；`stream` 比较特殊——用一个透传的 async generator 包一层 `fullStream`，边转发给调用方边累积文本，等流真正消费完（或提前中断）再打印一次完整输出，不影响原有的流式消费方式。
+
+**验证**：`npx tsc --noEmit -p .` clean。真实调用验证了四种场景：① 纯文本 `invokeObject`，输入输出完整打印；② 消息里带 `Buffer` 类型图片（`analyzeAd`/`analyzeEpisode` 那种写法），正确摘要成"[二进制数据，约 9399 字节]"；③ `AiImage.run` 带 base64 参考图，输入摘要正确，但第一次验证发现输出的 `data:image/png;base64,...` 没有被摘要（正则没处理 data URI 前缀），修了 `looksLikeBase64` 之后重新验证，输出正确摘要成"[图片 base64 数据，约 1036442 字符]"；④ `stream` 流式调用，确认边打印输入、流真正消费完之后打印累积的完整输出文本，且不影响调用方拿到的实际文本内容。
+
+**怎么看日志**：这些 `console.log` 直接打印到跑后端进程的 stdout，没有单独落盘到某张表或某个专门的日志文件。如果后端是自己在终端里直接跑 `yarn dev`，日志就直接显示在那个终端窗口里；如果是像本次这样用 `nohup yarn dev > /tmp/backend-dev.log 2>&1 &` 这种方式重定向到文件启动的，就用 `tail -f /tmp/backend-dev.log` 实时看。
+
+---
+
 ## 2026-07-25 VideoGenAgent 分镜草案改成结构化字段 + 按 Stage 拆分两套 prompt 模板
 
 **触发原因**：参考 Toonflow-app `data/modelPrompt/video/` 下的几份视频提示词模板研究"如何和用户交互生成视频"，发现它是按供应商/模型的参考图输入能力分成好几套模板——多参考图场景用 `@图N` 编号引用消歧，单参考图场景没有编号消歧的必要，用单段式散文表达。对照 VideoGenAgent 自己的两个 stage：Stage A（gpt-image-1 草案图）最多有 2 张参考图（Episode 结尾帧 + 广告参考图），天然需要消歧；Stage B（Seedance-2.0 成片渲染，`mode:["singleImage"]`）只有 1 张参考图（已确认的草案图本身），没有消歧问题。而 VideoGenAgent 原来的 `stageADraftSchema` 只有一个笼统的 `{prompt, framingNotes}`，两个 stage 共用同一段自由文本，没有体现这个结构性差异，讨论后决定现在就做这次重构（不算启动 M8，M8 里真正大头的真实截图提取、PlayableAgent 素材来源分支、SupervisorAgent 终审升级都还没动）。
