@@ -8,6 +8,7 @@ import ResTool from "@/socket/resTool";
 import { revisePlan } from "@/agents/directorAgent";
 import { reviseDraftCut } from "@/agents/videoGenAgent";
 import { revisePlayable } from "@/agents/playableAgent";
+import * as actions from "@/agents/sessionAgent/actions";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -30,6 +31,14 @@ const reviseCutInputSchema = z.object({
   feedback: z.string().describe("用户对这份内容提出的具体修改意见"),
 });
 
+const planIdInputSchema = z.object({
+  planId: z.number().describe("要确认/批准的创意方案 id"),
+});
+
+const creativePlanIdInputSchema = z.object({
+  creativePlanId: z.number().describe("要操作的创意方案 id"),
+});
+
 function createTools(ctx: AgentContext) {
   const run_sub_agent_director_plan_revise = tool({
     description: "根据用户的自由文字反馈修改某一份已存在的创意方案，仅在用户明确针对某个具体方案提出修改意见时调用",
@@ -47,7 +56,7 @@ function createTools(ctx: AgentContext) {
         evaluatorFeedback: updated.evaluatorFeedback,
       });
       planMsg.complete();
-      return `已根据反馈修改方案 ${planId}，新的方案已推送给用户查看。`;
+      return `已根据反馈修改方案 ${planId}，评分 ${updated.planEvaluatorScore}，评审意见：${updated.evaluatorFeedback.feedback}。新的方案已推送给用户查看。`;
     },
   });
 
@@ -68,7 +77,7 @@ function createTools(ctx: AgentContext) {
         evaluatorFeedback: updated.evaluation.feedback,
       });
       cutMsg.complete();
-      return `已重画分镜草案 ${bridgeCutId}，新的草案图已推送给用户查看。`;
+      return `已重画分镜草案 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的草案图已推送给用户查看。`;
     },
   });
 
@@ -86,7 +95,55 @@ function createTools(ctx: AgentContext) {
         evaluatorFeedback: updated.evaluation.feedback,
       });
       gameMsg.complete();
-      return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，新的预览已推送给用户查看。`;
+      return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的预览已推送给用户查看。`;
+    },
+  });
+
+  const run_confirm_plan = tool({
+    description:
+      "确认/批准某一份创意方案，仅在用户明确表达要选定某个具体方案时调用（比如「我选方案1」「就用第二个」「确认这个方案」）。" +
+      "背后是和按钮点击完全一样的确定性逻辑，会自动校验当前阶段是否允许。",
+    inputSchema: jsonSchema<{ planId: number }>(planIdInputSchema.toJSONSchema()),
+    execute: async ({ planId }) => {
+      await actions.confirmPlanAction(ctx.resTool, ctx.episodeId, planId);
+      return `已提交对方案 ${planId} 的确认请求，处理结果请看下方消息。`;
+    },
+  });
+
+  const run_generate_content = tool({
+    description: "为已确认（approved）的方案生成桥接内容，仅在用户明确要求开始生成内容/分镜草案时调用（比如「开始生成内容」「生成吧」）",
+    inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
+    execute: async ({ creativePlanId }) => {
+      await actions.generateContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
+      return `已为方案 ${creativePlanId} 提交生成内容的请求，处理结果请看下方消息。`;
+    },
+  });
+
+  const run_confirm_draft_cuts = tool({
+    description: "确认分镜草案、开始渲染成片，仅在用户明确表示分镜草案没问题可以渲染成片时调用（比如「草案可以，渲染成片吧」「确认分镜」）",
+    inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
+    execute: async ({ creativePlanId }) => {
+      await actions.confirmDraftCutsAction(ctx.resTool, creativePlanId);
+      return `已为方案 ${creativePlanId} 提交确认分镜草案的请求，处理结果请看下方消息。`;
+    },
+  });
+
+  const run_assemble_playable = tool({
+    description:
+      "视频成片渲染完成后，确认组装小游戏，仅在用户明确要求继续组装小游戏时调用（比如「组装小游戏」「继续吧」，通常发生在刚看到成片之后）",
+    inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
+    execute: async ({ creativePlanId }) => {
+      await actions.assemblePlayableAction(ctx.resTool, creativePlanId);
+      return `已为方案 ${creativePlanId} 提交组装小游戏的请求，处理结果请看下方消息。`;
+    },
+  });
+
+  const run_confirm_content = tool({
+    description: "确认内容完成、进入终审与落地，仅在用户明确表示内容没问题可以进入终审时调用（比如「可以了，提交终审」「确认内容」）",
+    inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
+    execute: async ({ creativePlanId }) => {
+      await actions.confirmContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
+      return `已为方案 ${creativePlanId} 提交进入终审与落地的请求，处理结果请看下方消息。`;
     },
   });
 
@@ -94,10 +151,16 @@ function createTools(ctx: AgentContext) {
     run_sub_agent_director_plan_revise,
     run_sub_agent_bridge_video_revise,
     run_sub_agent_playable_revise,
+    run_confirm_plan,
+    run_generate_content,
+    run_confirm_draft_cuts,
+    run_assemble_playable,
+    run_confirm_content,
   };
 }
 
 async function buildPlansContext(episodeId: number): Promise<string> {
+  const episode = await u.db("ab_episode").where("id", episodeId).first();
   const plans = await u.db("ab_creativePlan").where("episodeId", episodeId).orderBy("id");
   const planLines = plans.length
     ? plans.map((p: any) => `- 方案 id=${p.id} adId=${p.adId} status=${p.status} 基调=${p.tone}`)
@@ -109,7 +172,7 @@ async function buildPlansContext(episodeId: number): Promise<string> {
     ? cuts.map((c: any) => `- 内容 cut id=${c.id} 所属方案=${c.creativePlanId} 类型=${c.type} status=${c.status}`)
     : ["（暂无）"];
 
-  return `## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;
+  return `## 当前阶段\nworkflowStage=${episode?.workflowStage ?? "未知"}\n\n## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;
 }
 
 export async function runDecisionAI(ctx: AgentContext): Promise<void> {

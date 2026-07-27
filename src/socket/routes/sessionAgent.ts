@@ -4,9 +4,7 @@ import { Namespace, Socket } from "socket.io";
 import * as agent from "@/agents/sessionAgent";
 import * as state from "@/agents/sessionAgent/state";
 import * as videoGenAgent from "@/agents/videoGenAgent";
-import * as playableAgent from "@/agents/playableAgent";
-import * as supervisorAgent from "@/agents/supervisorAgent";
-import * as assembler from "@/agents/assembler";
+import * as actions from "@/agents/sessionAgent/actions";
 import ResTool from "@/socket/resTool";
 
 async function verifyToken(rawToken: string): Promise<boolean> {
@@ -44,37 +42,7 @@ export default (nsp: Namespace) => {
     const resTool = new ResTool(socket, { episodeId });
     let abortController: AbortController | null = null;
 
-    // 按 cut 类型派发到对应执行 Agent 并推卡片——bridgeCut:generate 首次生成、bridgeCut:retry 重试失败的 cut、
-    // bridgeCut:assemblePlayable 手动确认组装小游戏，三处共用
-    async function generateCutContent(cut: { id: number; index: number; type: string }) {
-      if (cut.type === "video") {
-        const result = await videoGenAgent.generateDraftCut(cut.id);
-        const msg = resTool.newMessage("assistant", "桥接视频");
-        msg.storyboardCut({
-          bridgeCutId: cut.id,
-          index: cut.index,
-          imageUrl: result.imageUrl,
-          prompt: result.assembledPrompt,
-          status: "draft",
-          evaluatorScore: result.evaluation.overallScore,
-          evaluatorFeedback: result.evaluation.feedback,
-        });
-        msg.complete();
-      } else if (cut.type === "playableGame") {
-        const result = await playableAgent.assemblePlayable(cut.id);
-        const msg = resTool.newMessage("assistant", "互动游戏");
-        msg.contentCandidate({
-          bridgeCutId: cut.id,
-          type: "playableGame",
-          previewUrl: result.previewUrl,
-          evaluatorScore: result.evaluation.overallScore,
-          evaluatorFeedback: result.evaluation.feedback,
-        });
-        msg.complete();
-      }
-    }
-
-    // plan:generate —— 确定性代码，不经过 LLM
+    // plan:generate —— 确定性代码，不经过 LLM。选哪些广告素材参与是多选下拉框操作，不适合聊天触发，保留纯按钮
     socket.on("plan:generate", async (data: { adIds: number[] }) => {
       try {
         const plans = await state.startPlanning(episodeId, data.adIds);
@@ -97,41 +65,17 @@ export default (nsp: Namespace) => {
       }
     });
 
-    // plan:approve —— 确定性代码，不经过 LLM
+    // plan:approve —— 按钮点击和聊天说"我选方案X"共用 actions.confirmPlanAction
     socket.on("plan:approve", async (data: { planId: number }) => {
-      const msg = resTool.newMessage("assistant");
-      try {
-        await state.approvePlan(episodeId, data.planId);
-        const text = msg.text(`已确认方案 ${data.planId}，进入内容生成阶段。`);
-        text.complete();
-        msg.complete();
-      } catch (err) {
-        msg.error(u.error(err).message);
-      }
+      await actions.confirmPlanAction(resTool, episodeId, data.planId);
     });
 
-    // bridgeCut:generate —— 确定性代码，不经过 LLM。M7 起固定两段式：这里只生成 video 段的 Stage A 分镜草案，
-    // playableGame 段留到 video 成片渲染完、用户手动点「确认组装小游戏」才触发（见 bridgeCut:assemblePlayable）
+    // bridgeCut:generate —— 按钮点击和聊天触发共用 actions.generateContentAction
     socket.on("bridgeCut:generate", async (data: { creativePlanId: number }) => {
-      try {
-        const cuts = await state.createBridgeCuts(episodeId, data.creativePlanId);
-        const videoCuts = cuts.filter((cut) => cut.type === "video");
-        const results = await Promise.allSettled(videoCuts.map((cut) => generateCutContent(cut)));
-        // allSettled 本身不会抛错，失败的 cut 在这里显式记日志+推给用户，避免静默吞掉；cut 状态已由各 Agent 自己的 catch 块置为 failed，可通过 bridgeCut:retry 重试
-        results.forEach((result, i) => {
-          if (result.status !== "rejected") return;
-          const cut = videoCuts[i];
-          console.error(`[sessionAgent] bridgeCut ${cut.id}（type=${cut.type}）生成失败:`, u.error(result.reason).message);
-          const msg = resTool.newMessage("assistant");
-          msg.error(`cut ${cut.id}（${cut.type}）生成失败：${u.error(result.reason).message}，可点击重试`);
-        });
-      } catch (err) {
-        const msg = resTool.newMessage("assistant");
-        msg.error(u.error(err).message);
-      }
+      await actions.generateContentAction(resTool, episodeId, data.creativePlanId);
     });
 
-    // bridgeCut:retry —— 确定性代码，不经过 LLM。对单个 failed 状态的 cut 重新派发生成，不重建 cut 本身
+    // bridgeCut:retry —— 只有按钮会触发（对已存在失败 cut 的操作，不在"聊天触发下一步"范围内）
     socket.on("bridgeCut:retry", async (data: { bridgeCutId: number }) => {
       try {
         const cut = await u.db("ab_bridgeCut").where("id", data.bridgeCutId).first();
@@ -158,7 +102,7 @@ export default (nsp: Namespace) => {
           });
           msg.complete();
         } else {
-          await generateCutContent({ id: data.bridgeCutId, index: cut.index!, type: cut.type! });
+          await actions.generateCutContent(resTool, { id: data.bridgeCutId, index: cut.index!, type: cut.type! });
         }
       } catch (err) {
         const msg = resTool.newMessage("assistant");
@@ -166,125 +110,22 @@ export default (nsp: Namespace) => {
       }
     });
 
-    // bridgeCut:confirm —— 确定性代码，不经过 LLM。全部分镜草案确认后触发 Stage B 渲染
+    // bridgeCut:confirm —— 按钮点击和聊天触发共用 actions.confirmDraftCutsAction
     socket.on("bridgeCut:confirm", async (data: { creativePlanId: number }) => {
-      const msg = resTool.newMessage("assistant");
-      try {
-        await videoGenAgent.confirmAllCuts(data.creativePlanId);
-        const text = msg.text("已确认全部分镜草案，开始渲染成片。");
-        text.complete();
-        msg.complete();
-
-        const videoCuts = await u.db("ab_bridgeCut").where("creativePlanId", data.creativePlanId).where("type", "video");
-        const results = await Promise.allSettled(
-          videoCuts.map(async (cut: any) => {
-            const result = await videoGenAgent.renderStageB(cut.id);
-            const renderMsg = resTool.newMessage("assistant", "桥接视频");
-            renderMsg.videoCandidate({
-              bridgeCutId: cut.id,
-              videoUrl: result.videoUrl,
-              durationMs: result.durationMs,
-              evaluatorScore: result.evaluation.overallScore,
-              evaluatorFeedback: result.evaluation.feedback,
-            });
-            renderMsg.complete();
-          }),
-        );
-        // 同 bridgeCut:generate 的教训：allSettled 不会抛错，Stage B 渲染失败必须显式记日志+推给用户，
-        // 否则前端会一直卡在"内容生成中..."，既不知道失败了也没法重试
-        results.forEach((result, i) => {
-          if (result.status !== "rejected") return;
-          const cut = videoCuts[i];
-          console.error(`[sessionAgent] bridgeCut ${cut.id} 成片渲染失败:`, u.error(result.reason).message);
-          const errMsg = resTool.newMessage("assistant");
-          errMsg.error(`cut ${cut.id}（成片渲染）失败：${u.error(result.reason).message}，可点击重试`);
-        });
-      } catch (err) {
-        msg.error(u.error(err).message);
-      }
+      await actions.confirmDraftCutsAction(resTool, data.creativePlanId);
     });
 
-    // bridgeCut:assemblePlayable —— 确定性代码，不经过 LLM。M7 新增的手动确认点：video 段成片渲染完之后，
-    // 不自动直通组装小游戏，等用户主动点击才触发，校验 video 段状态后派发 playableGame 段生成
+    // bridgeCut:assemblePlayable —— 按钮点击和聊天触发共用 actions.assemblePlayableAction
     socket.on("bridgeCut:assemblePlayable", async (data: { creativePlanId: number }) => {
-      const msg = resTool.newMessage("assistant");
-      try {
-        const cuts = await u.db("ab_bridgeCut").where("creativePlanId", data.creativePlanId);
-        const videoCut = cuts.find((c: any) => c.type === "video");
-        const gameCut = cuts.find((c: any) => c.type === "playableGame");
-        if (!videoCut) throw new Error(`创意方案 ${data.creativePlanId} 缺少 video cut`);
-        if (videoCut.status !== "done") throw new Error(`桥接视频 cut ${videoCut.id} 当前状态是 ${videoCut.status}，还没渲染完成，不能组装小游戏`);
-        if (!gameCut || gameCut.id == null) throw new Error(`创意方案 ${data.creativePlanId} 缺少 playableGame cut`);
-        if (gameCut.status !== "pending") throw new Error(`小游戏 cut ${gameCut.id} 当前状态是 ${gameCut.status}，不是 pending，不能重复组装`);
-
-        const text = msg.text("已确认组装小游戏，开始生成。");
-        text.complete();
-        msg.complete();
-
-        try {
-          await generateCutContent({ id: gameCut.id, index: gameCut.index ?? 0, type: "playableGame" });
-        } catch (genErr) {
-          // 同 bridgeCut:confirm 的教训：失败必须显式记日志+推给用户，不能静默消失
-          console.error(`[sessionAgent] bridgeCut ${gameCut.id}（playableGame）组装失败:`, u.error(genErr).message);
-          const errMsg = resTool.newMessage("assistant");
-          errMsg.error(`小游戏组装失败：${u.error(genErr).message}，可点击重试`);
-        }
-      } catch (err) {
-        msg.error(u.error(err).message);
-      }
+      await actions.assemblePlayableAction(resTool, data.creativePlanId);
     });
 
-    // content:confirm —— 确定性代码，不经过 LLM。SupervisorAgent 落地前终审通过才让 Assembler 组装最终交付物
+    // content:confirm —— 按钮点击和聊天触发共用 actions.confirmContentAction
     socket.on("content:confirm", async (data: { creativePlanId: number }) => {
-      const msg = resTool.newMessage("assistant");
-      try {
-        await state.assertContentReady(episodeId, data.creativePlanId);
-
-        const supervision = await supervisorAgent.runSupervision(data.creativePlanId);
-        const supervisionMsg = resTool.newMessage("assistant", "终审");
-        supervisionMsg.supervisorResult({
-          bridgeCutId: supervision.bridgeCutId,
-          passed: supervision.passed,
-          contentCompliance: supervision.contentCompliance,
-          brandSafety: supervision.brandSafety,
-          technicalSpec: supervision.technicalSpec,
-          issues: supervision.issues,
-          feedback: supervision.feedback,
-        });
-        supervisionMsg.complete();
-
-        if (!supervision.passed) {
-          const text = msg.text("落地终审未通过，请根据上面的问题修改内容后重新确认。");
-          text.complete();
-          msg.complete();
-          return;
-        }
-
-        const manifestId = await assembler.assemble(episodeId, data.creativePlanId, supervision);
-        await state.enterAssembling(episodeId);
-
-        const manifestRow = await u.db("ab_manifest").where("id", manifestId).first();
-        const manifestJson = JSON.parse(manifestRow?.manifestJson ?? "{}");
-        const manifestMsg = resTool.newMessage("assistant", "落地");
-        manifestMsg.manifest({
-          manifestId,
-          episodeId,
-          creativePlanId: data.creativePlanId,
-          type: manifestJson.type,
-          deliverableUrl: manifestJson.deliverable?.url,
-          ctaUrl: manifestJson.assets?.ctaUrl,
-        });
-        manifestMsg.complete();
-
-        const text = msg.text("已完成落地终审和最终组装。");
-        text.complete();
-        msg.complete();
-      } catch (err) {
-        msg.error(u.error(err).message);
-      }
+      await actions.confirmContentAction(resTool, episodeId, data.creativePlanId);
     });
 
-    // chat —— 自由文字，交给 LLM 做意图路由（唯一的工具是方案 revise）
+    // chat —— 自由文字，交给 LLM 做意图路由（识别"确认/下一步"类意图 + 方案/内容 revise）
     socket.on("chat", async (data: { content: string }) => {
       abortController?.abort();
       abortController = new AbortController();
