@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>contextual-ad-agent · Agent 数据流向图</title>
+<style>
+  :root {
+    --bg: #0a0f16;
+    --bg-panel: #0f1720;
+    --grid: rgba(120, 150, 180, 0.06);
+    --ink: #dce6ef;
+    --ink-dim: #8ea3b8;
+    --ink-faint: #5b6f83;
+    --rule: #1e2b38;
+    --db: #4a9dd6;
+    --db-bg: #0f2942;
+    --agent: #2dd4bf;
+    --agent-bg: #0f3630;
+    --skill: #e0ac4a;
+    --skill-bg: #2e2410;
+    --fe: #b98ef0;
+    --fe-bg: #241c33;
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 24px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--agent);
+    margin: 0 0 10px;
+  }
+
+  h1 {
+    font-size: clamp(22px, 3.2vw, 30px);
+    font-weight: 650;
+    margin: 0 0 10px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .sub {
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    line-height: 1.65;
+    max-width: 780px;
+    margin: 0;
+  }
+
+  .sub code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .legend-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+
+  .legend-card .swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    flex: none;
+  }
+
+  .legend-card .name {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .legend-card .desc {
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .line-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+    align-items: center;
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 28px;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+  }
+
+  .line-legend .item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .line-sample {
+    width: 34px;
+    height: 0;
+    border-top: 2px solid var(--ink-dim);
+  }
+  .line-sample.dotted {
+    border-top-style: dashed;
+  }
+
+  .diagram-wrap {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+
+  .diagram-wrap .mermaid {
+    margin: 0;
+    min-width: 1400px;
+  }
+
+  footer {
+    margin-top: 24px;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    line-height: 1.7;
+  }
+
+  footer code {
+    font-family: var(--mono);
+    color: var(--ink-dim);
+  }
+
+  @media (max-width: 700px) {
+    .page { padding: 28px 16px 60px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <p class="eyebrow">contextual-ad-agent · M0–M7</p>
+    <h1>Agent 之间的数据流向图</h1>
+    <p class="sub">
+      三类通信渠道：<code>data/skills/*.md</code> 定义每个 Agent 的角色指令（不传数据）；
+      SQLite 表是真正的 agent 间通信总线（写 JSON blob / 读 id 句柄）；
+      内存里的 TS interface 只在单次函数调用的参数/返回值里存在，用完即弃。
+    </p>
+  </header>
+
+  <div class="legend">
+    <div class="legend-card">
+      <div class="swatch-row"><span class="swatch" style="background:var(--skill)"></span><span class="name">Skill 文件（markdown）</span></div>
+      <p class="desc">配置 Agent 人格/指令，运行时 fs.readFile 读入当 system prompt，不是被交换的数据本身</p>
+    </div>
+    <div class="legend-card">
+      <div class="swatch-row"><span class="swatch" style="background:var(--db)"></span><span class="name">数据库（SQLite 表）</span></div>
+      <p class="desc">Agent 间真正的通信总线；大多只传一个 id 句柄，下游自己重新查库还原上下文</p>
+    </div>
+    <div class="legend-card">
+      <div class="swatch-row"><span class="swatch" style="background:var(--agent)"></span><span class="name">Agent / 编排代码</span></div>
+      <p class="desc">读写数据库、调用模型的执行单元；相互之间基本不直接调用，靠数据库中转</p>
+    </div>
+    <div class="legend-card">
+      <div class="swatch-row"><span class="swatch" style="background:var(--fe)"></span><span class="name">Socket 消息 / 前端</span></div>
+      <p class="desc">纯 TS discriminated union，序列化成 JSON 走 Socket.IO，不落库，即时消费即丢弃</p>
+    </div>
+  </div>
+
+  <div class="line-legend">
+    <div class="item"><span class="line-sample"></span> 写入 / 主流程调用</div>
+    <div class="item"><span class="line-sample dotted"></span> 读取 / 引用（不改变状态）</div>
+  </div>
+
+  <div class="diagram-wrap">
+<pre class="mermaid">
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030',
+  'primaryTextColor': '#e8eef5',
+  'primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83',
+  'secondaryColor': '#1c2b3d',
+  'tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  'fontSize': '13px'
+}}}%%
+flowchart LR
+  subgraph S0["输入"]
+    direction TB
+    EP["Episode<br/>视频文件"]
+    ADSRC["广告素材<br/>视频/图片/文字"]
+  end
+
+  subgraph S1["分析层 · M1"]
+    direction TB
+    SBA["StoryboardAgent"]
+    ALA["AdLibraryAgent"]
+  end
+
+  DB1[("ab_episode<br/>.episodeAnalysis<br/>JSON")]
+  DB2[("ab_ad<br/>.analysisResult<br/>JSON")]
+
+  subgraph S2["编排层 · M2"]
+    direction TB
+    DECIDE["sessionAgent/index.ts<br/>LLM 意图路由 + tool calling"]
+    STATE["sessionAgent/state.ts<br/>纯代码状态机"]
+  end
+
+  DIR["DirectorAgent"]
+  DB3[("ab_creativePlan<br/>narrative/tone/score")]
+  DB4[("ab_bridgeCut<br/>.scriptText  JSON")]
+
+  PC["shared/planContext.ts<br/>loadPlanContext()"]
+
+  subgraph S3["执行层 · M3/M7"]
+    direction TB
+    VGA_A["VideoGenAgent<br/>Stage A 草案图"]
+    VGA_B["VideoGenAgent<br/>Stage B 成片渲染"]
+    PA["PlayableAgent"]
+  end
+
+  DB5[("ab_generatedSegment<br/>filePath / state / isSelected")]
+
+  subgraph S4["终审与落地 · M4"]
+    direction TB
+    SUP["SupervisorAgent"]
+    ASM["Assembler"]
+  end
+
+  DB6[("ab_manifest<br/>.manifestJson  JSON")]
+
+  SOCKET["ResTool<br/>Socket.IO 消息卡片"]
+  UI["前端 Vue 组件"]
+
+  EP --> SBA
+  ADSRC --> ALA
+  SBA -->|写| DB1
+  ALA -->|写| DB2
+
+  DECIDE --> STATE
+  DB1 -.->|读| STATE
+  DB2 -.->|读| STATE
+  STATE -->|"generatePlans()"| DIR
+  DIR -.->|读| DB1
+  DIR -.->|读| DB2
+  DIR -->|写| DB3
+  DB3 -->|approvePlan| STATE
+  STATE -->|"createBridgeCuts()<br/>固定两段：video→playableGame"| DB4
+
+  DB4 -->|"creativePlanId 句柄"| PC
+  DB1 -.->|还原| PC
+  DB2 -.->|还原| PC
+  PC -->|"{episodeAnalysis, ad}"| VGA_A
+  PC --> PA
+  PC --> SUP
+
+  VGA_A -->|"scriptText: StageADraft"| DB4
+  VGA_A -->|draftImage| DB5
+  DB4 -.->|读草案| VGA_B
+  VGA_B -->|finalRender| DB5
+
+  DB5 -.->|"读 video 段真实成片"| PA
+  PA -->|"bridge.mp4 写入游戏包"| DB5
+
+  DB4 -.-> SUP
+  DB5 -.-> SUP
+  SUP -->|"passed=true"| ASM
+  DB5 -.-> ASM
+  ASM -->|写| DB6
+
+  DECIDE -->|"run_sub_agent_*<br/>revise 工具调用"| DIR
+  DECIDE -.-> VGA_A
+  DECIDE -.-> PA
+
+  DIR --> SOCKET
+  VGA_A --> SOCKET
+  VGA_B --> SOCKET
+  PA --> SOCKET
+  SUP --> SOCKET
+  ASM --> SOCKET
+  SOCKET --> UI
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef frontend fill:#241c33,stroke:#b98ef0,color:#ecdcff,stroke-width:1.5px;
+  classDef input fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+
+  class DB1,DB2,DB3,DB4,DB5,DB6 db;
+  class SBA,ALA,DIR,VGA_A,VGA_B,PA,SUP,ASM,STATE,DECIDE,PC agent;
+  class SOCKET,UI frontend;
+  class EP,ADSRC input;
+</pre>
+  </div>
+
+  <footer>
+    对应代码：<code>src/agents/*/index.ts</code>、<code>src/agents/shared/planContext.ts</code>、<code>src/agents/sessionAgent/{index,state}.ts</code>、
+    <code>src/lib/initDB.ts</code>（表结构）、<code>src/socket/{resTool.ts,chatMessagesData.d.ts,routes/sessionAgent.ts}</code>。
+    深色蓝图风格是这张图有意固定的视觉选择，不跟随系统浅色/深色主题切换。
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+</script>
+</body>
+</html>

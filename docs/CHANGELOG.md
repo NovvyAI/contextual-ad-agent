@@ -12,6 +12,28 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-26 聊天框也能触发"确认方案/生成内容/确认分镜草案/组装小游戏/确认内容"这五步
+
+**用户意见**：确认方案现在只能点方案卡片上的按钮，在聊天框里说"我选方案1"不会有任何反应，希望按钮和聊天都能触发管线里每一步"下一步"动作。
+
+**关键判断**：这个改动和之前讨论过、明确拒绝的"让 SessionAgent 自己判断要不要派发/要不要重新设计"不是一回事——不是让 LLM 去决定这些确定性动作要不要发生，只是让它多识别一种"用户已经用自然语言明确表达了这个意图"的说法，再委托给和按钮完全同一份、本来就有校验的确定性函数。状态机本身没有变化，只是多了一个触发入口。
+
+**改了什么**：新增 `src/agents/sessionAgent/actions.ts`，把 `src/socket/routes/sessionAgent.ts` 里 `plan:approve`/`bridgeCut:generate`/`bridgeCut:confirm`/`bridgeCut:assemblePlayable`/`content:confirm` 五个 socket 事件处理器的编排逻辑（含 `generateCutContent` 这个按 cut 类型派发执行 Agent 的共用函数）抽成 5 个可复用的 action 函数，socket 层的处理器现在只是薄薄一层转发。`src/agents/sessionAgent/index.ts` 新增 5 个 tool（`run_confirm_plan`/`run_generate_content`/`run_confirm_draft_cuts`/`run_assemble_playable`/`run_confirm_content`），`execute()` 直接调用同一批 action 函数，返回给 LLM 的是一句通用 ack（真实结果照旧通过 resTool 推消息卡片，不依赖 LLM 复述）。`data/skills/session_agent_decision.md` 补充教 LLM 识别这五类"确认/下一步"意图，删掉了原来"结构化操作不会经过你""不要代替用户做确认方案决定"这两条现在已经不对的表述；`buildPlansContext()` 额外把 `episode.workflowStage` 加进注入给 LLM 的上下文，帮它判断当前阶段哪个动作有意义。`plan:generate`（选广告素材那步）保持纯按钮，没有加聊天入口——选哪些广告参与是多选操作，不适合塞进一句自由文字。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。真实浏览器走了一遍：新建 Episode → 选广告生成方案 → 不点"确认这份方案"按钮，在聊天框输入"我选方案41"发送 → 页面顶部 `workflowStage` 从 `plan_review` 变成 `content_review`，ActionBar 正确切换成"生成内容"按钮；直接查库确认 `ab_creativePlan.status` 变成了 `approved`——和点按钮的效果完全一致。前端零改动（`plan:approve` 等事件名/payload 没变，只是服务端内部实现从内联逻辑换成调用共享函数）。
+
+---
+
+## 2026-07-26 revise 工具返回给 LLM 决策层的确认语带上评分/评审意见
+
+**触发原因**：讨论 SessionAgent 的 `run_sub_agent_*` 工具要不要参照 Toonflow-app 的模式，让 LLM 决策层"读懂"子 agent 的完整输出再自己决定怎么回复用户。结论是不需要引入这种不确定性——SessionAgent 现在唯一要做的判断（自由文字对应哪个具体 plan/cut）已经很窄，让 LLM 去"理解"变长的返回内容没有真实收益，还会让同一次调用换个措辞就可能产生不同行为。真正想要的"回复更具体"这个效果，代码直接拼出来就够了，不需要 LLM 参与这一步。
+
+**改了什么**：`src/agents/sessionAgent/index.ts` 三个 revise 工具（`run_sub_agent_director_plan_revise`/`run_sub_agent_bridge_video_revise`/`run_sub_agent_playable_revise`）的 `execute()` 返回值，从"已根据反馈修改方案 X，新的方案已推送给用户查看"这种不带具体信息的模板，改成把 `evaluatorFeedback.feedback`/`evaluation.overallScore`/`evaluation.feedback` 这些已经算出来的评审结果拼进去，比如"已根据反馈修改方案 X，评分 88，评审意见：...。新的方案已推送给用户查看。"——这段字符串本身还是会被 LLM 看到（作为 tool result 进它的对话上下文），但内容是代码拼好的确定值，不依赖 LLM 去解读评审对象的原始结构。
+
+**验证**：`npx tsc --noEmit -p .` clean。
+
+---
+
 ## 2026-07-26 统一的大模型调用输入输出日志
 
 **用户意见**：每次项目调用大模型的时候，输入输出都要用 log 打印到 terminal 上；如果输入输出是非文本（图片/视频/音频），只需要简单概述一下内容，不用打印原始数据。
