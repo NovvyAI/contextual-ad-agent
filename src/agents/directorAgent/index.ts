@@ -5,6 +5,7 @@ import type { EpisodeAnalysis } from "@/agents/storyboardAgent/schema";
 import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import { planGenerationSchema, planEvaluationBatchSchema, type PlanDraft, type PlanEvaluation } from "./schema";
 import { buildPlanGenerationMessages, buildPlanEvaluationMessages, buildReviseMessages } from "./prompt";
+import { recordRevise } from "@/agents/shared/reviseHistory";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
@@ -114,5 +115,12 @@ export async function revisePlan(planId: number, feedback: string): Promise<Crea
 
   const { evaluatorFeedback, ...dbRow } = rowFromPlanAndEvaluation(row.episodeId, revised, evaluation.evaluations[0]);
   await u.db("ab_creativePlan").where("id", planId).update(dbRow);
+  await recordRevise(
+    "plan",
+    planId,
+    feedback,
+    { narrative: row.narrative, tone: row.tone, planEvaluatorScore: row.planEvaluatorScore },
+    { narrative: dbRow.narrative, tone: dbRow.tone, planEvaluatorScore: dbRow.planEvaluatorScore },
+  );
   return { ...dbRow, id: planId, evaluatorFeedback };
 }

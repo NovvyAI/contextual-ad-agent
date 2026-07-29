@@ -5,6 +5,7 @@ import { loadPlanContext } from "@/agents/shared/planContext";
 import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
 import { buildStageADraftMessages, buildReviseMessages, buildMotionReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
+import { recordRevise } from "@/agents/shared/reviseHistory";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-1";
@@ -144,6 +145,7 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
     );
     const evaluation = await evaluateDraft(draft);
     const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    await recordRevise("bridgeCutDraft", bridgeCutId, feedback, existing, draft);
     return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -259,7 +261,9 @@ export async function reviseStageBMotion(bridgeCutId: number, feedback: string):
     );
     const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone };
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(constrainedDraft) });
-    return await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
+    const result = await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
+    await recordRevise("bridgeCutMotion", bridgeCutId, feedback, existing, constrainedDraft);
+    return result;
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
     throw e;

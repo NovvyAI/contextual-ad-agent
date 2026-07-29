@@ -262,6 +262,20 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("createTime");
       },
     },
+    // revise 历史——方案/分镜草案/运镜专用/小游戏四种 revise 流程都会写一条，留给以后做训练数据用。
+    // targetId 的含义随 targetType 变化（plan→planId，其余三种→bridgeCutId），不建外键约束。
+    {
+      name: "ab_reviseHistory",
+      builder: (table) => {
+        table.increments("id");
+        table.text("targetType"); // plan | bridgeCutDraft | bridgeCutMotion | playable
+        table.integer("targetId");
+        table.text("feedback"); // 用户原始反馈——revise 流程里此前唯一没有落库的部分
+        table.text("beforeState"); // JSON
+        table.text("afterState"); // JSON
+        table.integer("createTime");
+      },
+    },
   ];
 
   for (const t of tables) {
