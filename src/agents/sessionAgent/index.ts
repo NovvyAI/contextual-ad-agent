@@ -6,7 +6,7 @@ import path from "path";
 import u from "@/utils";
 import ResTool from "@/socket/resTool";
 import { revisePlan } from "@/agents/directorAgent";
-import { reviseDraftCut } from "@/agents/videoGenAgent";
+import { reviseDraftCut, reviseStageBMotion } from "@/agents/videoGenAgent";
 import { revisePlayable } from "@/agents/playableAgent";
 import * as actions from "@/agents/sessionAgent/actions";
 
@@ -61,7 +61,12 @@ function createTools(ctx: AgentContext) {
   });
 
   const run_sub_agent_bridge_video_revise = tool({
-    description: "只重画桥接视频的某一张分镜草案图，其他分镜草案不受影响，仅在用户针对某个具体分镜草案提出修改意见时调用",
+    description:
+      "重新生成桥接视频的分镜草案图（画面内容会改变），仅在用户反馈涉及画面内容本身时调用" +
+      "（比如「头发乱了」「场景不对」「人物表情不对」这类画面构图/主体/光影问题）。" +
+      "如果反馈只是关于运镜或节奏（比如「运镜太快」「镜头晃得奇怪」），且该 cut 已经渲染出成片，" +
+      "应该改用 run_sub_agent_bridge_video_revise_motion，不要用这个工具，因为这个工具会让用户重新走一遍确认分镜、渲染成片的流程。" +
+      "如果反馈本身模糊、看不出是画面内容问题还是运镜/节奏问题，不要自己猜，直接用文字询问用户「是画面内容需要重新设计，还是只是运镜/节奏需要调整」。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
     execute: async ({ bridgeCutId, feedback }) => {
       const updated = await reviseDraftCut(bridgeCutId, feedback);
@@ -77,7 +82,29 @@ function createTools(ctx: AgentContext) {
         evaluatorFeedback: updated.evaluation.feedback,
       });
       cutMsg.complete();
-      return `已重画分镜草案 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的草案图已推送给用户查看。`;
+      return `已重新生成分镜草案 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的草案图已推送给用户查看，需要用户重新确认分镜、渲染成片。`;
+    },
+  });
+
+  const run_sub_agent_bridge_video_revise_motion = tool({
+    description:
+      "只调整桥接视频成片的运镜/节奏，草案图不会重新生成、画面内容不变，仅在该 cut 已经渲染出成片（status=done）" +
+      "且用户反馈明确是关于运镜/动态节奏问题时调用（比如「运镜太快了」「镜头晃得有点奇怪」「节奏拖沓」）。" +
+      "如果反馈是关于画面内容本身（人物/场景/构图看起来不对），应该调用 run_sub_agent_bridge_video_revise 重新生成草案，不要用这个工具。" +
+      "如果反馈本身模糊、看不出是哪一种，不要自己猜，直接用文字询问用户「是画面内容需要重新设计，还是只是运镜/节奏需要调整」。",
+    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
+    execute: async ({ bridgeCutId, feedback }) => {
+      const updated = await reviseStageBMotion(bridgeCutId, feedback);
+      const msg = ctx.resTool.newMessage("assistant", "桥接视频");
+      msg.videoCandidate({
+        bridgeCutId: updated.bridgeCutId,
+        videoUrl: updated.videoUrl,
+        durationMs: updated.durationMs,
+        evaluatorScore: updated.evaluation.overallScore,
+        evaluatorFeedback: updated.evaluation.feedback,
+      });
+      msg.complete();
+      return `已调整成片 ${bridgeCutId} 的运镜/节奏并重新渲染，草案图和画面内容未改变，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的成片已推送给用户查看。`;
     },
   });
 
@@ -150,6 +177,7 @@ function createTools(ctx: AgentContext) {
   return {
     run_sub_agent_director_plan_revise,
     run_sub_agent_bridge_video_revise,
+    run_sub_agent_bridge_video_revise_motion,
     run_sub_agent_playable_revise,
     run_confirm_plan,
     run_generate_content,

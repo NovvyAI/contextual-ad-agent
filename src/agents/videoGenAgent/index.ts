@@ -3,7 +3,7 @@ import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
-import { buildStageADraftMessages, buildReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
+import { buildStageADraftMessages, buildReviseMessages, buildMotionReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
@@ -172,53 +172,94 @@ export async function confirmAllCuts(creativePlanId: number): Promise<void> {
     .update({ status: "draftConfirmed" });
 }
 
+/** Stage B 渲染的共用部分：调 Seedance、存新 finalRender 段、把 cut 标记完成——渲染入口(draftConfirmed→done)和运镜专用 revise(done→done)都走这里 */
+async function performStageBRender(bridgeCutId: number, creativePlanId: number, draft: StageADraft): Promise<RenderResult> {
+  const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
+  if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
+  const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+  const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
+  if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
+  const episodeId = plan.episodeId;
+
+  const video = await u.Ai.Video(VIDEO_MODEL_KEY).run(
+    {
+      duration: STAGE_B_DURATION_S,
+      resolution: "1080p",
+      aspectRatio: "9:16",
+      prompt: assembleStageBPrompt(draft),
+      referenceList: [{ type: "image", base64: draftImageBase64 }],
+      mode: ["singleImage"],
+    },
+    { taskClass: "videoGen-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+  );
+  const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
+  await video.save(relPath);
+  const videoUrl = await u.oss.getFileUrl(relPath);
+  const durationMs = STAGE_B_DURATION_S * 1000;
+
+  const evaluation = await evaluateRender(draft, durationMs);
+
+  await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "finalRender").update({ isSelected: 0 });
+  await u.db("ab_generatedSegment").insert({
+    bridgeCutId,
+    model: VIDEO_MODEL_KEY,
+    filePath: relPath,
+    state: "done",
+    stage: "finalRender",
+    isSelected: 1,
+    createTime: Date.now(),
+  });
+  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "done", durationMs });
+
+  return { bridgeCutId, videoUrl, durationMs, evaluation };
+}
+
 export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
   const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
   if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
   if (cut.status !== "draftConfirmed") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没确认草案，不能渲染成片`);
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
+  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
   try {
     const draft = JSON.parse(cut.scriptText) as StageADraft;
-    const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
-    if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
-    const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
-    const plan = await u.db("ab_creativePlan").where("id", cut.creativePlanId).first();
-    if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
-    const episodeId = plan.episodeId;
+    return await performStageBRender(bridgeCutId, cut.creativePlanId, draft);
+  } catch (e) {
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+    throw e;
+  }
+}
 
-    const video = await u.Ai.Video(VIDEO_MODEL_KEY).run(
+/**
+ * 只调整成片的运镜/节奏，不重新生成草案图——和 reviseDraftCut 是两条互斥的 revise 路径，由用户明确选择走哪一条
+ * （session_agent_decision.md 教 SessionAgent 在反馈含糊时直接问用户，而不是替用户猜）。
+ * 只允许 cameraMovement/emotionalTone 变化，其余字段强制锁定成已确认草案的原值，防止 prompt 和已生成的静态图对不上。
+ */
+export async function reviseStageBMotion(bridgeCutId: number, feedback: string): Promise<RenderResult> {
+  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
+  if (cut.status !== "done") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没有成片，不能调整运镜`);
+  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
+
+  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+  try {
+    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
+    const existing = JSON.parse(cut.scriptText) as StageADraft;
+    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
-        duration: STAGE_B_DURATION_S,
-        resolution: "1080p",
-        aspectRatio: "9:16",
-        prompt: assembleStageBPrompt(draft),
-        referenceList: [{ type: "image", base64: draftImageBase64 }],
-        mode: ["singleImage"],
+        schema: stageADraftSchema,
+        system: systemPrompt,
+        messages: buildMotionReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
       },
-      { taskClass: "videoGen-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      { taskClass: "videoGen-stageB-motionRevise", describe: `Cut ${bridgeCutId} 运镜/节奏调整`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
-    const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
-    await video.save(relPath);
-    const videoUrl = await u.oss.getFileUrl(relPath);
-    const durationMs = STAGE_B_DURATION_S * 1000;
-
-    const evaluation = await evaluateRender(draft, durationMs);
-
-    await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "finalRender").update({ isSelected: 0 });
-    await u.db("ab_generatedSegment").insert({
-      bridgeCutId,
-      model: VIDEO_MODEL_KEY,
-      filePath: relPath,
-      state: "done",
-      stage: "finalRender",
-      isSelected: 1,
-      createTime: Date.now(),
-    });
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "done", durationMs });
-
-    return { bridgeCutId, videoUrl, durationMs, evaluation };
+    const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone };
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(constrainedDraft) });
+    return await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
     throw e;
