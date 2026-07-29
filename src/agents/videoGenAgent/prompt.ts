@@ -66,6 +66,27 @@ export function buildReviseMessages(
 }
 
 /**
+ * 只针对成片的运镜/节奏问题——草案图已确认，不重新生成，所以只允许模型重新考虑
+ * cameraMovement/emotionalTone 这两个不影响画面构图的字段，其余字段照抄，避免 prompt 描述的内容和
+ * 已经生成好的静态图对不上。
+ */
+export function buildMotionReviseMessages(
+  episodeAnalysis: EpisodeAnalysis,
+  ad: AdEntry,
+  narrative: string,
+  tone: string,
+  existing: StageADraft,
+  feedback: string,
+): ModelMessage[] {
+  const text =
+    `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 当前分镜草案（画面已确认，草案图不会重新生成）\n${formatDraftSummary(existing)}\n\n` +
+    `## 用户对成片的反馈\n${feedback}\n\n` +
+    `这条反馈只针对成片的运镜/节奏，不涉及画面内容本身。请只重新给出 cameraMovement 和 emotionalTone 这两个字段的新值，` +
+    `其余字段（shotSize、subjectAction、lightingMood、framingNotes）原样返回当前草案的值，不要修改。`;
+  return [{ role: "user", content: text }];
+}
+
+/**
  * Stage A（gpt-image-1 草案图）：最多两张参考图需要消歧——Episode 结尾画面 + 广告参考图，
  * 参考 Toonflow-app universalMulti-parameterMode.md 的 @图N 编号引用法，按传入顺序编号，
  * 让模型明确知道每张参考图在画面里分别扮演什么角色，不再靠一句笼统描述让模型自己猜。

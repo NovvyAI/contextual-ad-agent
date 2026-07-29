@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-29 新增"只改运镜/节奏"的成片 revise 路径，和"重新生成草案"并列为用户可选的两种 revise
+
+**用户意见 / 触发原因**：追问 revise 机制时发现一个真实缺口——成片渲染完之后，任何反馈（不管是"头发乱了"这种画面内容问题，还是"运镜太快了"这种纯运镜/节奏问题）都只能走 `reviseDraftCut`，即整份分镜草案重新生成、图片重新画一遍、还要用户重新走一遍确认分镜→渲染成片的流程。对于纯运镜/节奏类反馈这是不必要的开销——草案图已经确认过，画面内容没有问题，理论上只需要重新渲染 Stage B。用户明确要求给用户一个显式的二选一（只改运镜节奏 / 重新生成草案），不要让 SessionAgent 自己猜该走哪条路径。
+
+**改了什么**：`videoGenAgent/index.ts` 把 `renderStageB` 里"调 Seedance、存新 finalRender 段、把 cut 标记 done"的部分抽成公共函数 `performStageBRender(bridgeCutId, creativePlanId, draft)`；新增 `reviseStageBMotion(bridgeCutId, feedback)`，要求 `cut.status==="done"`，只让 LLM 重新考虑 `cameraMovement`/`emotionalTone` 两个字段（`prompt.ts` 新增 `buildMotionReviseMessages`，指令里明确要求其余字段原样返回），代码层再强制锁定 `shotSize`/`subjectAction`/`lightingMood`/`framingNotes` 为已确认草案的原值（双重保险，防止模型不听指令），跳过 Stage A 图片重新生成，直接复用已选定的草案图调用 `performStageBRender`，成功后 `cut.status` 直接回到 `"done"`，不经过 `"draft"`。`sessionAgent/index.ts` 新增聊天工具 `run_sub_agent_bridge_video_revise_motion`，和已有的 `run_sub_agent_bridge_video_revise` 分工写进各自的 `description` 里；`session_agent_decision.md` 教会 SessionAgent 两者的区别——反馈涉及画面内容用前者，纯运镜/节奏且成片已渲染用后者，**反馈含糊分不清是哪种时，直接用文字问用户，不允许自己猜**。
+
+**验证**：`npx tsc --noEmit -p .` clean。真实调用 `reviseStageBMotion(22, ...)`：第一次命中了 Seedance 供应商的内容策略拒绝（`OutputAudioSensitiveContentDetected`，和本次改动无关），验证了失败路径下草案图段和旧 finalRender 段都完好未被破坏、`cut.status` 正确落到 `failed`；重置状态后第二次真实调用成功，`cameraMovement` 按反馈从"推进"改成"甩镜"，`shotSize`/`subjectAction`/`lightingMood`/`framingNotes` 逐字节保持不变，草案图 segment 全程未变（同一个 id），新的 finalRender 段插入且旧段被置为未选中，`cut.status` 直接回到 `done`，全程没有经过 `draft`/重新确认。
+
+---
+
 ## 2026-07-29 把方案批准时的 narrative/tone 传给 VideoGenAgent/PlayableAgent/SupervisorAgent
 
 **触发原因**：讨论"Episode→视频→游戏"要不要有一套共享的基调/context 时发现一个真实缺口——`shared/planContext.ts` 的 `loadPlanContext()` 只传 `episodeAnalysis`/`ad`，没有把这份方案自己被批准时的 `narrative`/`tone` 带上。用户在方案卡片上确认的具体创意方向，VideoGenAgent/PlayableAgent/SupervisorAgent 完全看不到，各自只能从 Episode 原始分析里重新猜一个基调，和实际批准的方案对不上。不是设计取舍，是漏传了。
