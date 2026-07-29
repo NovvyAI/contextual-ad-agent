@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-29 把方案批准时的 narrative/tone 传给 VideoGenAgent/PlayableAgent/SupervisorAgent
+
+**触发原因**：讨论"Episode→视频→游戏"要不要有一套共享的基调/context 时发现一个真实缺口——`shared/planContext.ts` 的 `loadPlanContext()` 只传 `episodeAnalysis`/`ad`，没有把这份方案自己被批准时的 `narrative`/`tone` 带上。用户在方案卡片上确认的具体创意方向，VideoGenAgent/PlayableAgent/SupervisorAgent 完全看不到，各自只能从 Episode 原始分析里重新猜一个基调，和实际批准的方案对不上。不是设计取舍，是漏传了。
+
+**改了什么**：`PlanContext` 接口加 `narrative`/`tone` 两个字段，`loadPlanContext()` 从已经查出来的 `plan` 行里读取（顺带加了 `plan.narrative`/`plan.tone` 判空校验）。`videoGenAgent/prompt.ts`、`playableAgent/prompt.ts`、`supervisorAgent/prompt.ts` 的 `formatContext()` 都加上 `narrative`/`tone` 参数，在拼给模型的上下文最前面加一段"## 已批准的创意方向"；`buildStageADraftMessages`/`buildGenerateMessages`/`buildSupervisionMessages` 的指令文字也补一句"应该呼应上面已批准的创意方向"/"检查是否偏离了已批准的创意方向"。三个 agent 的 `index.ts` 对应的 `loadPlanContext()` 调用点都改成解构出 `narrative, tone` 再传下去。
+
+**验证**：`npx tsc --noEmit -p .` clean。真实调用 `generateDraftCut`，靠现成的大模型调用日志直接看到实际发给模型的 prompt——"## 已批准的创意方向\n构思：...\n基调：..."正确出现在 Episode 结尾状态之前，确认数据真的传到了。这次调用因为上游服务临时抖动没有生成完，但和这次改动无关，不影响验证结论。
+
+---
+
 ## 2026-07-26 聊天框也能触发"确认方案/生成内容/确认分镜草案/组装小游戏/确认内容"这五步
 
 **用户意见**：确认方案现在只能点方案卡片上的按钮，在聊天框里说"我选方案1"不会有任何反应，希望按钮和聊天都能触发管线里每一步"下一步"动作。
