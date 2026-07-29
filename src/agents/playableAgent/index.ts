@@ -5,6 +5,7 @@ import { loadPlanContext } from "@/agents/shared/planContext";
 import { playableConfigSchema, type PlayableConfig } from "./schema";
 import { buildGenerateMessages, buildReviseMessages } from "./prompt";
 import { evaluatePlayable, type PlayableEvaluation } from "./evaluator";
+import { recordRevise } from "@/agents/shared/reviseHistory";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-1";
@@ -128,6 +129,7 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
     );
     const evaluation = await evaluatePlayable(config);
     const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, config, evaluation);
+    await recordRevise("playable", bridgeCutId, feedback, existing, config);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });

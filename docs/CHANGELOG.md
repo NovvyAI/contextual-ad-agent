@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-29 四条 revise 流程统一加历史记录，留给以后做训练数据
+
+**用户意见 / 触发原因**：讨论方案 revise 是"原地覆盖，旧版本不保留"时，用户问能不能想办法保留，以后做训练用。排查发现问题比方案这一处更大——四条 revise 流程（方案/分镜草案/运镜专用/小游戏配置）里，用户反馈的原文本身哪里都没有落库，只是喂给模型就丢了；方案的 revise 还是直接 `UPDATE` 覆盖旧值。这两个缺口都会让"根据反馈修改内容"这个任务将来没有干净的训练样本可用。
+
+**改了什么**：新增 `ab_reviseHistory` 表（`initDB.ts` 里加的，走既有的"新表自动建表"机制，不需要额外写 `fixDB.ts` 迁移），列为 `targetType`（`plan`/`bridgeCutDraft`/`bridgeCutMotion`/`playable`）+ `targetId`（方案 revise 是 planId，其余三种是 bridgeCutId，不建外键，因为指向两张不同的表）+ `feedback`（用户反馈原文）+ `beforeState`/`afterState`（JSON，revise 前后的内容对象）+ `createTime`。新增 `src/agents/shared/reviseHistory.ts` 导出唯一的 `recordRevise()` 写入函数，四个 revise 函数（`directorAgent.revisePlan`、`videoGenAgent.reviseDraftCut`、`videoGenAgent.reviseStageBMotion`、`playableAgent.revisePlayable`）各自在拿到新旧状态之后调用一次——`beforeState`/`afterState` 只存"会变化的创意内容"本身（方案是 `{narrative,tone,planEvaluatorScore}`，分镜草案/运镜专用是 `StageADraft`，小游戏是 `PlayableConfig`），不混入 URL、prompt 这些派生的操作性数据，四种类型的记录结构保持对称，方便以后统一读取。
+
+**验证**：`npx tsc --noEmit -p .` clean；直接查库确认 `ab_reviseHistory` 首次启动时被自动建出来。真实调用验证了两条路径：`revisePlan(39, "基调再幽默一点...")`——历史记录里 `beforeState`/`afterState` 的 `narrative`/`tone`/`planEvaluatorScore` 和方案表实际改动前后的值完全对应；`reviseDraftCut(22, "画面再暗一点，情绪基调更神秘")`——历史记录里的 `StageADraft` 完整对应 revise 前后的分镜草案。另外两条路径（运镜专用 revise、小游戏 revise）复用的是同一个 `recordRevise()` 函数，且上一条改动（运镜专用 revise）已经做过真实的完整链路验证，这次直接用 `recordRevise()` 的独立单元调用确认了写入/JSON 序列化正确，没有再重复跑一遍完整的 Seedance/gpt-image-1 生成流程。
+
+---
+
 ## 2026-07-29 新增"只改运镜/节奏"的成片 revise 路径，和"重新生成草案"并列为用户可选的两种 revise
 
 **用户意见 / 触发原因**：追问 revise 机制时发现一个真实缺口——成片渲染完之后，任何反馈（不管是"头发乱了"这种画面内容问题，还是"运镜太快了"这种纯运镜/节奏问题）都只能走 `reviseDraftCut`，即整份分镜草案重新生成、图片重新画一遍、还要用户重新走一遍确认分镜→渲染成片的流程。对于纯运镜/节奏类反馈这是不必要的开销——草案图已经确认过，画面内容没有问题，理论上只需要重新渲染 Stage B。用户明确要求给用户一个显式的二选一（只改运镜节奏 / 重新生成草案），不要让 SessionAgent 自己猜该走哪条路径。
