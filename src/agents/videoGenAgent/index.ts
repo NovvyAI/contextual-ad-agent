@@ -104,13 +104,13 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   try {
-    const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
     const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: stageADraftSchema,
         system: systemPrompt,
-        messages: buildStageADraftMessages(episodeAnalysis, ad),
+        messages: buildStageADraftMessages(episodeAnalysis, ad, narrative, tone),
       },
       { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
@@ -131,14 +131,14 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过草案，不能 revise`);
 
   try {
-    const { episodeId, adId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as StageADraft;
     const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: stageADraftSchema,
         system: systemPrompt,
-        messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+        messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
       },
       { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );

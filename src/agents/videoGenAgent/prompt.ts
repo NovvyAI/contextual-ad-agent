@@ -25,16 +25,17 @@ const CAMERA_MOVEMENT_EN: Record<string, string> = {
   环绕: "surround shooting",
 };
 
-function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): string {
+function formatContext(episodeAnalysis: EpisodeAnalysis, ad: AdEntry, narrative: string, tone: string): string {
   return [
+    `## 已批准的创意方向\n构思：${narrative}\n基调：${tone}`,
     `## Episode 结尾状态\n摘要：${episodeAnalysis.endingState.summary}\n最后画面：${episodeAnalysis.endingState.lastVisualDescription}\n建议承接基调：${episodeAnalysis.endingState.suggestedTone}`,
     `## 广告信息\n游戏：${ad.game.name}（${ad.game.genre}）\n核心卖点：${ad.game.keySellingPoints.join("、")}\n调性：${ad.tone}`,
   ].join("\n\n");
 }
 
-export function buildStageADraftMessages(episodeAnalysis: EpisodeAnalysis, ad: AdEntry): ModelMessage[] {
+export function buildStageADraftMessages(episodeAnalysis: EpisodeAnalysis, ad: AdEntry, narrative: string, tone: string): ModelMessage[] {
   const text =
-    `${formatContext(episodeAnalysis, ad)}\n\n请构思承接结尾画面过渡到游戏开场的分镜设计。` +
+    `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n请构思承接结尾画面过渡到游戏开场的分镜设计，应该呼应上面"已批准的创意方向"。` +
     `景别、运镜请从给定选项里选择，不要用自由文本描述镜头语言；其余字段严格基于上面给出的信息作答，不编造未提及的情节、角色或游戏玩法细节。`;
   return [{ role: "user", content: text }];
 }
@@ -50,9 +51,16 @@ function formatDraftSummary(draft: StageADraft): string {
   ].join("\n");
 }
 
-export function buildReviseMessages(episodeAnalysis: EpisodeAnalysis, ad: AdEntry, existing: StageADraft, feedback: string): ModelMessage[] {
+export function buildReviseMessages(
+  episodeAnalysis: EpisodeAnalysis,
+  ad: AdEntry,
+  narrative: string,
+  tone: string,
+  existing: StageADraft,
+  feedback: string,
+): ModelMessage[] {
   const text =
-    `${formatContext(episodeAnalysis, ad)}\n\n## 当前分镜草案\n${formatDraftSummary(existing)}\n\n` +
+    `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 当前分镜草案\n${formatDraftSummary(existing)}\n\n` +
     `## 用户反馈\n${feedback}\n\n请根据反馈修改这份分镜设计。`;
   return [{ role: "user", content: text }];
 }

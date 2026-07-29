@@ -89,13 +89,13 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   try {
-    const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: playableConfigSchema,
         system: systemPrompt,
-        messages: buildGenerateMessages(episodeAnalysis, ad),
+        messages: buildGenerateMessages(episodeAnalysis, ad, narrative, tone),
       },
       { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
@@ -115,14 +115,14 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
 
   try {
-    const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as PlayableConfig;
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
         schema: playableConfigSchema,
         system: systemPrompt,
-        messages: buildReviseMessages(episodeAnalysis, ad, existing, feedback),
+        messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
       },
       { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );

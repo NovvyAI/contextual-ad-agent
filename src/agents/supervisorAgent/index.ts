@@ -54,7 +54,7 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
     };
   }
 
-  const { episodeId, episodeAnalysis, ad } = await loadPlanContext(cut.creativePlanId);
+  const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
 
   // video 类型复用 Stage A 的草案图做审核依据，不为了终审重新抽帧；playableGame 无图，只看配置
   let imageRelPath: string | null = null;
@@ -66,6 +66,8 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
   const messages = buildSupervisionMessages(
     episodeAnalysis,
     ad,
+    narrative,
+    tone,
     { type: cutType, scriptText: cut.scriptText ?? null, prompt: cut.prompt ?? null, durationMs: cut.durationMs ?? null },
     imageRelPath ? resolveOssPath(imageRelPath) : null,
   );
