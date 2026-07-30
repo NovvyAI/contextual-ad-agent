@@ -25,21 +25,42 @@ export interface PlayableResult {
   evaluation: PlayableEvaluation;
 }
 
-async function assemble(bridgeCutId: number, episodeId: number, creativePlanId: number, config: PlayableConfig, evaluation: PlayableEvaluation): Promise<string> {
+async function assemble(
+  bridgeCutId: number,
+  episodeId: number,
+  creativePlanId: number,
+  adId: number,
+  tileCandidates: string[],
+  config: PlayableConfig,
+  evaluation: PlayableEvaluation,
+): Promise<string> {
   const relDir = `bridgeCut/${bridgeCutId}/playable`;
   const containerTemplate = fs.readFileSync(u.getPath(["templates", "playable", "container.html"]), "utf-8");
   const gameTemplate = fs.readFileSync(u.getPath(["templates", "playable", "game.html"]), "utf-8");
 
-  // 配对素材：LLM 给的 distinct prompt 各生成一张图，循环填满 DEFAULT_PAIRS 个格子（和 Python 参考实现的 cycle 逻辑一致）
+  // 配对素材：优先用 AdLibraryAgent 挑出的真实游戏截图（至少 2 张才有配对意义），
+  // 否则回退到 LLM 给的 distinct prompt 各生成一张图（和 Python 参考实现的 cycle 逻辑一致）
   const tileUrls: string[] = [];
-  for (let i = 0; i < config.tilePrompts.length; i++) {
-    const relPath = `${relDir}/game/assets/tiles/tile_src_${i}.png`;
-    const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
-      { prompt: config.tilePrompts[i], size: "1K", aspectRatio: "1:1" },
-      { taskClass: "playable-tileImage", describe: `Cut ${bridgeCutId} 配对素材图 ${i}`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    await image.save(relPath);
-    tileUrls.push(await u.oss.getFileUrl(relPath));
+  if (tileCandidates.length >= 2) {
+    for (let i = 0; i < tileCandidates.length; i++) {
+      const localPath = u.getPath(["ad", String(adId), "frames", tileCandidates[i]]);
+      if (!fs.existsSync(localPath)) continue;
+      const relPath = `${relDir}/game/assets/tiles/tile_src_${i}.jpg`;
+      await u.oss.writeFile(relPath, fs.readFileSync(localPath));
+      tileUrls.push(await u.oss.getFileUrl(relPath));
+    }
+  }
+  if (tileUrls.length < 2) {
+    tileUrls.length = 0;
+    for (let i = 0; i < config.tilePrompts.length; i++) {
+      const relPath = `${relDir}/game/assets/tiles/tile_src_${i}.png`;
+      const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+        { prompt: config.tilePrompts[i], size: "1K", aspectRatio: "1:1" },
+        { taskClass: "playable-tileImage", describe: `Cut ${bridgeCutId} 配对素材图 ${i}`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      await image.save(relPath);
+      tileUrls.push(await u.oss.getFileUrl(relPath));
+    }
   }
   const manifestTiles = Array.from({ length: DEFAULT_PAIRS }, (_, i) => tileUrls[i % tileUrls.length]);
 
@@ -90,7 +111,7 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
 
   try {
-    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
       {
@@ -101,7 +122,7 @@ export async function assemblePlayable(bridgeCutId: number): Promise<PlayableRes
       { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluatePlayable(config);
-    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, config, evaluation);
+    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, adId, ad.tileCandidates ?? [], config, evaluation);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -116,7 +137,7 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
   if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
 
   try {
-    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
     const existing = JSON.parse(cut.scriptText) as PlayableConfig;
     const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
@@ -128,7 +149,7 @@ export async function revisePlayable(bridgeCutId: number, feedback: string): Pro
       { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluatePlayable(config);
-    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, config, evaluation);
+    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, adId, ad.tileCandidates ?? [], config, evaluation);
     await recordRevise("playable", bridgeCutId, feedback, existing, config);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {

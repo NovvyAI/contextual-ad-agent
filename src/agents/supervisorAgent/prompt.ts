@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import type { ModelMessage } from "ai";
 import type { EpisodeAnalysis } from "@/agents/storyboardAgent/schema";
 import type { AdEntry } from "@/agents/adLibraryAgent/schema";
@@ -28,10 +29,14 @@ export function buildSupervisionMessages(
   cut: { type: string; scriptText: string | null; prompt: string | null; durationMs: number | null },
   imageAbsPath: string | null,
 ): ModelMessage[] {
-  const text = `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 待终审内容\n${formatCut(cut)}\n\n请对这份即将交付的桥接内容做落地终审，检查是否偏离了上面"已批准的创意方向"。`;
+  const text =
+    `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 待终审内容\n${formatCut(cut)}\n\n请对这份即将交付的桥接内容做落地终审，检查是否偏离了上面"已批准的创意方向"。` +
+    `如果附带了一张图片，那是这份内容里能找到的一张具体画面（视频分镜草案图，或小游戏的配对素材截图），请结合它判断画面是否符合上面的信息、是否偏离了已批准的创意方向。`;
   const content: any[] = [{ type: "text", text }];
   if (imageAbsPath && fs.existsSync(imageAbsPath)) {
-    content.push({ type: "image", image: fs.readFileSync(imageAbsPath), mediaType: "image/png" });
+    const ext = path.extname(imageAbsPath).toLowerCase();
+    const mediaType = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+    content.push({ type: "image", image: fs.readFileSync(imageAbsPath), mediaType });
   }
   return [{ role: "user", content }];
 }
