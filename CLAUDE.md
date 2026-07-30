@@ -30,7 +30,11 @@
 - ✅ **M7** — 重新设计桥接流程：三选一形式（video/playableGame/ctaCard）改成固定两段式管线（过渡视频→H5 小游戏），Episode 分析加了观众情绪维度，新增手动确认组装小游戏的交互点（详见 `docs/milestones/M7.md`）
 - ✅ **M8** — 真实游戏内容管线：AdLibraryAgent 分析视频广告时顺带挑出真实游戏截图（`tileCandidates`），PlayableAgent 配对小游戏素材优先用这些真实截图（不够才回退 AI 生成），VideoGenAgent 选广告参考图优先用这些已验证的帧，SupervisorAgent 对 `playableGame` 的终审这次真的会看一张实际画面（详见 `docs/milestones/M8.md`）
 
-M8 之后规划了 M9（前端针对固定两段式流程的展示精修），具体实现细节还没有展开，等真正开始做的时候再规划。
+M8 之后规划了 M9，目前包含三块：
+① 前端针对固定两段式流程的展示精修；
+② 自定义玩法生成（`PlayableAgent.generateCustomGame`）目前没有 revise 机制，不满意只能整个重新生成，计划补一版"现有 GameSpec + 用户反馈 → 调整后的 GameSpec，按需重新生成代码"的 revise（同一套模式在方案/分镜草案/翻牌配对 revise 上都已经用过）；
+③ 视频和游戏生成完之后互相不知道对方长什么样——现在完全没有代码把两者的视觉内容关联起来。计划的做法不是让 video 提前猜游戏画面，而是反过来：游戏（翻牌配对的卡面素材，或自定义游戏的画面）生成完、内容已经确定之后，回头对视频做一次 revise，让结尾呼应这些已经生成好的真实素材（比如"卡面头像分裂、打乱、落到棋盘上"这种衔接）。不用新开 revise 工具，扩展现有的 `reviseDraftCut`/`run_sub_agent_bridge_video_revise`——`buildReferenceList` 在游戏已组装的场景下额外把游戏卡面素材当参考图塞进去，让模型是真的看着这些图去画，不是凭文字描述瞎猜。
+具体实现细节还没有展开，等真正开始做的时候再规划。
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
