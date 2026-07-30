@@ -28,8 +28,9 @@
 **M0-M6 是原始 work-plan 规划的全部里程碑**——从"上传 Episode+广告素材"到"落地一个真实可访问的最终交付物"的完整链路已经端到端跑通并验证，M5（浏览器界面）是规划之外但一直明确知道要做的追加里程碑，M6 补上了"用真实感素材验收"这最后一环。
 
 - ✅ **M7** — 重新设计桥接流程：三选一形式（video/playableGame/ctaCard）改成固定两段式管线（过渡视频→H5 小游戏），Episode 分析加了观众情绪维度，新增手动确认组装小游戏的交互点（详见 `docs/milestones/M7.md`）
+- ✅ **M8** — 真实游戏内容管线：AdLibraryAgent 分析视频广告时顺带挑出真实游戏截图（`tileCandidates`），PlayableAgent 配对小游戏素材优先用这些真实截图（不够才回退 AI 生成），VideoGenAgent 选广告参考图优先用这些已验证的帧，SupervisorAgent 对 `playableGame` 的终审这次真的会看一张实际画面（详见 `docs/milestones/M8.md`）
 
-M7 之后规划了 M8（真实游戏内容管线：截图提取、VideoGenAgent 结构化 prompt 重写、SupervisorAgent 终审升级）和 M9（前端针对新流程的展示精修），具体实现细节还没有展开，等真正开始做的时候再规划。
+M8 之后规划了 M9（前端针对固定两段式流程的展示精修），具体实现细节还没有展开，等真正开始做的时候再规划。
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 

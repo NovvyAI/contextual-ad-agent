@@ -15,14 +15,23 @@ function resolveOssPath(relPath: string): string {
   return u.getPath(["oss", relPath]);
 }
 
+/** 在组装好的游戏包目录（.../playable/game）里找第一张配对素材图的文件名，真实截图和 AI 生成的都符合这个命名 */
+function findTileFileName(gameDir: string): string | null {
+  const tilesDir = path.join(gameDir, "assets", "tiles");
+  if (!fs.existsSync(tilesDir)) return null;
+  return fs.readdirSync(tilesDir).find((f) => /^tile_src_\d+\.(png|jpe?g)$/i.test(f)) ?? null;
+}
+
 /** 代码层面的产物存在性检查——客观可判断的问题不该花一次模型调用 */
 function codePreCheck(cutType: string, filePath: string | null): string[] {
   if (!filePath) return ["没有找到已选定的最终产物"];
   const absPath = resolveOssPath(filePath);
   if (cutType === "playableGame") {
-    const indexPath = path.join(absPath, "index.html");
-    if (!fs.existsSync(indexPath)) return [`游戏包缺少 index.html: ${filePath}/index.html`];
-    return [];
+    const issues: string[] = [];
+    if (!fs.existsSync(path.join(absPath, "index.html"))) issues.push(`游戏包缺少 index.html: ${filePath}/index.html`);
+    if (!fs.existsSync(path.join(absPath, "game", "index.html"))) issues.push(`游戏包缺少 game/index.html: ${filePath}/game/index.html`);
+    if (!findTileFileName(path.join(absPath, "game"))) issues.push(`游戏包缺少配对素材图: ${filePath}/game/assets/tiles/`);
+    return issues;
   }
   if (!fs.existsSync(absPath)) return [`产物文件不存在: ${filePath}`];
   if (fs.statSync(absPath).size === 0) return [`产物文件为空: ${filePath}`];
@@ -56,11 +65,15 @@ export async function runSupervisionForCut(bridgeCutId: number): Promise<Supervi
 
   const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
 
-  // video 类型复用 Stage A 的草案图做审核依据，不为了终审重新抽帧；playableGame 无图，只看配置
+  // video 类型复用 Stage A 的草案图做审核依据，不为了终审重新抽帧；
+  // playableGame 类型取组装时用的第一张配对素材图（真实截图或 AI 生成），让终审也能看到实际画面
   let imageRelPath: string | null = null;
   if (cutType === "video") {
     const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
     imageRelPath = draftSegment?.filePath ?? null;
+  } else if (cutType === "playableGame" && finalSegment?.filePath) {
+    const tileFileName = findTileFileName(path.join(resolveOssPath(finalSegment.filePath), "game"));
+    imageRelPath = tileFileName ? `${finalSegment.filePath}/game/assets/tiles/${tileFileName}` : null;
   }
 
   const messages = buildSupervisionMessages(

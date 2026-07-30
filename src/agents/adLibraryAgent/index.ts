@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { ModelMessage } from "ai";
 import u from "@/utils";
-import { sampleFrames, hasAudio, extractAudioToWav } from "@/utils/video";
+import { sampleFrames, hasAudio, extractAudioToWav, type FrameRecord } from "@/utils/video";
 import { transcribeSegments, type AsrSegment } from "@/utils/asr";
 import { adAnalysisSchema, type AdEntry } from "./schema";
 
@@ -24,6 +24,7 @@ export async function analyzeAd(adId: number): Promise<void> {
   try {
     const sourceType: AdEntry["sourceType"] = ad.adType === "video" ? "video" : ad.adType === "image" ? "image" : "text";
     let hasVisualAsset = false;
+    let videoFrames: FrameRecord[] = [];
     const content: any[] = [{ type: "text", text: "## 广告素材" }];
 
     if (sourceType === "video") {
@@ -31,12 +32,12 @@ export async function analyzeAd(adId: number): Promise<void> {
       hasVisualAsset = true;
       const workDir = u.getPath(["ad", String(adId)]);
 
-      const frames = await sampleFrames(ad.sourceFilePath, path.join(workDir, "frames"), {
+      videoFrames = await sampleFrames(ad.sourceFilePath, path.join(workDir, "frames"), {
         mode: "scene",
         sceneThreshold: 0.4,
         includeLast: false,
       });
-      for (const frame of frames.slice(0, 20)) {
+      for (const frame of videoFrames.slice(0, 20)) {
         const ts = frame.approxTimestampS != null ? ` ~${frame.approxTimestampS}s` : "";
         content.push({ type: "text", text: `Frame ${frame.index}${ts}:` }, imagePart(frame.path));
       }
@@ -69,7 +70,12 @@ export async function analyzeAd(adId: number): Promise<void> {
       messages,
     });
 
-    const entry: AdEntry = { ...object, id: String(adId), sourceType, hasVisualAsset };
+    const tileCandidates = (object.tileCandidateFrameIndices ?? [])
+      .map((i) => videoFrames.find((f) => f.index === i))
+      .filter((f): f is FrameRecord => f != null)
+      .map((f) => path.basename(f.path));
+
+    const entry: AdEntry = { ...object, id: String(adId), sourceType, hasVisualAsset, tileCandidates };
     await u.db("ab_ad").where("id", adId).update({ analysisResult: JSON.stringify(entry), status: "analyzed" });
   } catch (e) {
     await u.db("ab_ad").where("id", adId).update({ status: "failed", errorReason: u.error(e).message });

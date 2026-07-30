@@ -3,6 +3,7 @@ import path from "path";
 import u from "@/utils";
 import { loadPlanContext } from "@/agents/shared/planContext";
 import { stageADraftSchema, type StageADraft, type BridgeVideoEvaluation } from "./schema";
+import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import { buildStageADraftMessages, buildReviseMessages, buildMotionReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
 import { recordRevise } from "@/agents/shared/reviseHistory";
@@ -37,12 +38,20 @@ function findEpisodeLastFrame(episodeId: number): string | null {
   return candidates.find((p) => fs.existsSync(p)) ?? null;
 }
 
-/** 广告素材的代表性参考图：视频广告取 AdLibraryAgent（M1）抽帧里的第一张，图片广告直接用原图，文案广告没有视觉素材 */
-function findAdReferenceFrame(adId: number, adType: string | null, sourceFilePath: string | null): string | null {
-  if (adType === "image") return sourceFilePath && fs.existsSync(sourceFilePath) ? sourceFilePath : null;
-  if (adType === "video") {
+/**
+ * 广告素材的代表性参考图：图片广告直接用原图，文案广告没有视觉素材；视频广告优先用 AdLibraryAgent（M8）
+ * 已经用视觉判断挑出的 tileCandidates 里第一张（画面已经确认过清晰、能代表游戏真实界面/玩法），
+ * 老数据没有这个字段或候选帧文件缺失才退回"取文件名排序第一张"的机械做法。
+ */
+function findAdReferenceFrame(adId: number, sourceType: string | null, sourceFilePath: string | null, tileCandidates: string[] = []): string | null {
+  if (sourceType === "image") return sourceFilePath && fs.existsSync(sourceFilePath) ? sourceFilePath : null;
+  if (sourceType === "video") {
     const framesDir = u.getPath(["ad", String(adId), "frames"]);
     if (!fs.existsSync(framesDir)) return null;
+    if (tileCandidates.length > 0) {
+      const preferred = path.join(framesDir, tileCandidates[0]);
+      if (fs.existsSync(preferred)) return preferred;
+    }
     const files = fs
       .readdirSync(framesDir)
       .filter((f) => /^frame_\d+\.jpg$/.test(f))
@@ -58,18 +67,18 @@ interface ReferenceBundle {
   hasAdFrame: boolean;
 }
 
-async function buildReferenceList(episodeId: number, adId: number): Promise<ReferenceBundle> {
+async function buildReferenceList(episodeId: number, adId: number, ad: AdEntry): Promise<ReferenceBundle> {
   const adRow = await u.db("ab_ad").where("id", adId).first();
   const refs: { type: "image"; base64: string }[] = [];
   const episodeFrame = findEpisodeLastFrame(episodeId);
   if (episodeFrame) refs.push({ type: "image", base64: fileToBase64(episodeFrame) });
-  const adFrame = findAdReferenceFrame(adId, adRow?.adType ?? null, adRow?.sourceFilePath ?? null);
+  const adFrame = findAdReferenceFrame(adId, ad.sourceType, adRow?.sourceFilePath ?? null, ad.tileCandidates);
   if (adFrame) refs.push({ type: "image", base64: fileToBase64(adFrame) });
   return { refs, hasEpisodeFrame: episodeFrame != null, hasAdFrame: adFrame != null };
 }
 
-async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, draft: StageADraft): Promise<{ imageUrl: string; assembledPrompt: string }> {
-  const { refs, hasEpisodeFrame, hasAdFrame } = await buildReferenceList(episodeId, adId);
+async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, ad: AdEntry, draft: StageADraft): Promise<{ imageUrl: string; assembledPrompt: string }> {
+  const { refs, hasEpisodeFrame, hasAdFrame } = await buildReferenceList(episodeId, adId, ad);
   const assembledPrompt = assembleStageAPrompt(draft, hasEpisodeFrame, hasAdFrame);
   const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
   const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
@@ -116,7 +125,7 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
       { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft);
     return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -144,7 +153,7 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
       { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, draft);
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft);
     await recordRevise("bridgeCutDraft", bridgeCutId, feedback, existing, draft);
     return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
