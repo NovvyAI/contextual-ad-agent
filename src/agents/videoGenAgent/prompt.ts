@@ -91,11 +91,12 @@ export function buildMotionReviseMessages(
  * 参考 Toonflow-app universalMulti-parameterMode.md 的 @图N 编号引用法，按传入顺序编号，
  * 让模型明确知道每张参考图在画面里分别扮演什么角色，不再靠一句笼统描述让模型自己猜。
  */
-export function assembleStageAPrompt(draft: StageADraft, hasEpisodeFrame: boolean, hasAdFrame: boolean): string {
+export function assembleStageAPrompt(draft: StageADraft, hasEpisodeFrame: boolean, hasAdFrame: boolean, hasGameAssetFrame: boolean = false): string {
   const refLines: string[] = [];
   let n = 1;
   let episodeTag: string | null = null;
   let adTag: string | null = null;
+  let gameAssetTag: string | null = null;
   if (hasEpisodeFrame) {
     episodeTag = `@图${n}`;
     refLines.push(`${episodeTag}：Episode 结尾最后一帧画面`);
@@ -106,10 +107,16 @@ export function assembleStageAPrompt(draft: StageADraft, hasEpisodeFrame: boolea
     refLines.push(`${adTag}：广告素材参考图`);
     n++;
   }
+  if (hasGameAssetFrame) {
+    gameAssetTag = `@图${n}`;
+    refLines.push(`${gameAssetTag}：已组装完成的小游戏真实素材参考图`);
+    n++;
+  }
 
   const transitionParts: string[] = [];
   if (episodeTag) transitionParts.push(`承接 ${episodeTag} 的画面`);
   if (adTag) transitionParts.push(`过渡到 ${adTag} 所代表的游戏视觉`);
+  if (gameAssetTag) transitionParts.push(`结尾可以呼应 ${gameAssetTag} 这份已经生成好的真实游戏素材`);
   transitionParts.push(draft.subjectAction);
 
   const sections = [

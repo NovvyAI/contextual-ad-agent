@@ -45,6 +45,18 @@ export const episodeAnalysisSchema = z.object({
         .describe("观众（而非剧中角色/场景）看完结尾后的情绪状态，供桥接内容设计的心理落点参考"),
     })
     .describe("结尾状态，供后续 DirectorAgent 承接桥接广告使用"),
+  tileCandidateFrameIndices: z
+    .array(z.number().int().min(0))
+    .max(8)
+    .optional()
+    .describe(
+      "从上面展示的编号帧（Frame N，覆盖全片的稀疏采样）里挑出清晰展示主要角色或有代表性场景的帧序号，" +
+        "供后续生成桥接内容时作为视觉素材候选参考；模糊、转场、无关的空镜头不要选，找不到合适的就返回空数组。" +
+        "只从 Frame N 编号的帧里选，不要参考结尾部分的 Tail frame N。",
+    ),
 });
 
-export type EpisodeAnalysis = z.infer<typeof episodeAnalysisSchema>;
+// 代码从 tileCandidateFrameIndices 映射出的实际帧文件名；老数据没有这个字段，消费方都要按可能是 undefined 处理
+export interface EpisodeAnalysis extends z.infer<typeof episodeAnalysisSchema> {
+  tileCandidates?: string[];
+}

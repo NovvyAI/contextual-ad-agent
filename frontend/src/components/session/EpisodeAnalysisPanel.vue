@@ -66,6 +66,19 @@ const intensityTheme: Record<string, "danger" | "warning" | "default"> = { high:
           适合承接的内容：{{ analysis.endingState.viewerEmotionalState.transitionReadiness }}
         </div>
       </div>
+
+      <div v-if="analysis.tileCandidateImages?.length">
+        <b>候选素材：</b>
+        <span style="color: var(--td-text-color-secondary, #666); font-size: 13px">生成游戏素材时可以选用这些真实画面作为参考</span>
+        <div style="display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap">
+          <img
+            v-for="img in analysis.tileCandidateImages"
+            :key="img.filename"
+            :src="img.url"
+            style="width: 72px; height: 72px; object-fit: cover; border-radius: 4px; border: 1px solid var(--td-border-level-2-color, #e7e7e7)"
+          />
+        </div>
+      </div>
     </t-space>
   </div>
 </template>

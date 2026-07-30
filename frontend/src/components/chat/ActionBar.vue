@@ -9,8 +9,8 @@ const props = defineProps<{
   onGeneratePlan: (adIds: number[]) => void;
   onGenerateContent: (creativePlanId: number) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
-  onAssemblePlayable: (creativePlanId: number) => void;
-  onGenerateCustomGame: (bridgeCutId: number, description: string) => void;
+  onAssemblePlayable: (creativePlanId: number, selectedCandidateFrames: string[]) => void;
+  onGenerateCustomGame: (bridgeCutId: number, description: string, selectedCandidateFrames: string[]) => void;
   onConfirmContent: (creativePlanId: number) => void;
   onRetryBridgeCut: (bridgeCutId: number) => void;
 }>();
@@ -18,12 +18,29 @@ const props = defineProps<{
 const selectedAdIds = ref<number[]>([]);
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
+const customGameSelectedFrames = ref<string[]>([]);
+const assembleDialogVisible = ref(false);
+const assembleSelectedFrames = ref<string[]>([]);
+
+const tileCandidateImages = computed(() => props.sessionState.episode.episodeAnalysis?.tileCandidateImages ?? []);
 
 function submitCustomGame() {
   if (!gameCut.value?.id || !customGameDescription.value.trim()) return;
-  props.onGenerateCustomGame(gameCut.value.id, customGameDescription.value.trim());
+  props.onGenerateCustomGame(gameCut.value.id, customGameDescription.value.trim(), customGameSelectedFrames.value);
   customGameDialogVisible.value = false;
   customGameDescription.value = "";
+  customGameSelectedFrames.value = [];
+}
+
+function openAssembleDialog() {
+  assembleSelectedFrames.value = [];
+  assembleDialogVisible.value = true;
+}
+
+function submitAssemblePlayable() {
+  if (!approvedPlan.value?.id) return;
+  props.onAssemblePlayable(approvedPlan.value.id, assembleSelectedFrames.value);
+  assembleDialogVisible.value = false;
 }
 
 const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) => p.status === "approved"));
@@ -62,11 +79,16 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
         确认分镜草案，开始渲染成片
       </t-button>
       <template v-else-if="approvedPlan && readyToAssemblePlayable">
-        <t-button theme="primary" :disabled="busy" @click="onAssemblePlayable(approvedPlan.id)">确认组装小游戏</t-button>
+        <t-button theme="primary" :disabled="busy" @click="openAssembleDialog">确认组装小游戏</t-button>
         <t-button theme="default" variant="outline" :disabled="busy" @click="customGameDialogVisible = true">自定义玩法生成</t-button>
       </template>
       <t-button v-else-if="approvedPlan && allCutsDone" theme="primary" :disabled="busy" @click="onConfirmContent(approvedPlan.id)">确认内容，进入终审与落地</t-button>
       <span v-else style="color: var(--td-text-color-secondary, #666)">内容生成中...</span>
+    </template>
+
+    <template v-else-if="sessionState.episode.workflowStage === 'assembling'">
+      <span style="color: var(--td-success-color, #2ba471)">已完成落地</span>
+      <t-link v-if="sessionState.manifest" :href="sessionState.manifest.deliverableUrl" target="_blank">查看最终交付物</t-link>
     </template>
 
     <t-dialog
@@ -80,11 +102,31 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
         描述想要的玩法，越详细越好——玩法类型、具体规则、通关条件、难度、想用什么风格的素材图，都可以写清楚，描述越具体，生成出来的游戏越接近预期。系统会据此现场生成一个对应的小游戏；如果生成失败，会自动回退到默认的翻牌配对版本。
       </p>
       <t-textarea v-model="customGameDescription" placeholder="比如：找不同玩法，给两张几乎一样的游戏截图，需要在30秒内点出5处不同，每找对一处有音效反馈，全部找完弹出通关庆祝……" :autosize="{ minRows: 5, maxRows: 14 }" />
+
+      <div v-if="tileCandidateImages.length" style="margin-top: 12px">
+        <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
+          可选：勾选下面这集里的画面作为素材参考（会作为参考图，不是直接拿来用，风格会重新绘制）
+        </p>
+        <t-checkbox-group v-model="customGameSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
+          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+            <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
+          </t-checkbox>
+        </t-checkbox-group>
+      </div>
     </t-dialog>
 
-    <template v-else-if="sessionState.episode.workflowStage === 'assembling'">
-      <span style="color: var(--td-success-color, #2ba471)">已完成落地</span>
-      <t-link v-if="sessionState.manifest" :href="sessionState.manifest.deliverableUrl" target="_blank">查看最终交付物</t-link>
-    </template>
+    <t-dialog v-model:visible="assembleDialogVisible" header="确认组装小游戏" width="600px" :on-confirm="submitAssemblePlayable" confirm-btn="开始组装">
+      <p style="margin: 0 0 8px; color: var(--td-text-color-secondary, #666); font-size: 13px">确认后开始生成默认的翻牌配对小游戏。</p>
+      <div v-if="tileCandidateImages.length">
+        <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
+          可选：勾选下面这集里的画面作为卡面素材参考（不选也可以正常生成）
+        </p>
+        <t-checkbox-group v-model="assembleSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
+          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+            <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
+          </t-checkbox>
+        </t-checkbox-group>
+      </div>
+    </t-dialog>
   </div>
 </template>

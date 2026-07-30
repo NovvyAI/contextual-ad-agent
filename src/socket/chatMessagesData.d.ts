@@ -80,7 +80,7 @@ export type ManifestContent = ChatBaseContent<'manifest', {
   manifestId: number;
   episodeId: number;
   creativePlanId: number;
-  type: string;
+  type: 'video' | 'playableGame';
   deliverableUrl: string;
   ctaUrl?: string;
 }>;

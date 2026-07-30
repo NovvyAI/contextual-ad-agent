@@ -17,6 +17,9 @@ export interface EpisodeAnalysis {
     suggestedTone: string;
     viewerEmotionalState: { primaryEmotion: string; intensity: "high" | "medium" | "low"; residualTension: string; transitionReadiness: string };
   };
+  // 供生成游戏素材时参考选用的候选帧，老数据可能没有这个字段
+  tileCandidates?: string[];
+  tileCandidateImages?: { filename: string; url: string }[];
 }
 
 export interface SessionState {
@@ -84,11 +87,11 @@ function makeSessionAgentStore(episodeId: number) {
     function confirmBridgeCuts(creativePlanId: number) {
       chat.socket.value?.emit("bridgeCut:confirm", { creativePlanId });
     }
-    function assemblePlayableCut(creativePlanId: number) {
-      chat.socket.value?.emit("bridgeCut:assemblePlayable", { creativePlanId });
+    function assemblePlayableCut(creativePlanId: number, selectedCandidateFrames: string[] = []) {
+      chat.socket.value?.emit("bridgeCut:assemblePlayable", { creativePlanId, selectedCandidateFrames });
     }
-    function generateCustomGame(bridgeCutId: number, description: string) {
-      chat.socket.value?.emit("bridgeCut:customGameGenerate", { bridgeCutId, description });
+    function generateCustomGame(bridgeCutId: number, description: string, selectedCandidateFrames: string[] = []) {
+      chat.socket.value?.emit("bridgeCut:customGameGenerate", { bridgeCutId, description, selectedCandidateFrames });
     }
     function confirmContent(creativePlanId: number) {
       chat.socket.value?.emit("content:confirm", { creativePlanId });

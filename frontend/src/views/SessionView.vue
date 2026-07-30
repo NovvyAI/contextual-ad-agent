@@ -63,8 +63,8 @@ function handleSend(text: string) {
       :on-generate-plan="(adIds) => store.generatePlan(adIds)"
       :on-generate-content="(planId) => store.generateBridgeCuts(planId)"
       :on-confirm-bridge-cuts="(planId) => store.confirmBridgeCuts(planId)"
-      :on-assemble-playable="(planId) => store.assemblePlayableCut(planId)"
-      :on-generate-custom-game="(cutId, description) => store.generateCustomGame(cutId, description)"
+      :on-assemble-playable="(planId, selectedCandidateFrames) => store.assemblePlayableCut(planId, selectedCandidateFrames)"
+      :on-generate-custom-game="(cutId, description, selectedCandidateFrames) => store.generateCustomGame(cutId, description, selectedCandidateFrames)"
       :on-confirm-content="(planId) => store.confirmContent(planId)"
       :on-retry-bridge-cut="(cutId) => store.retryBridgeCut(cutId)"
     />

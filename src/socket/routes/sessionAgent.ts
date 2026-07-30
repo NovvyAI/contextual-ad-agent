@@ -116,13 +116,14 @@ export default (nsp: Namespace) => {
     });
 
     // bridgeCut:assemblePlayable —— 按钮点击和聊天触发共用 actions.assemblePlayableAction
-    socket.on("bridgeCut:assemblePlayable", async (data: { creativePlanId: number }) => {
-      await actions.assemblePlayableAction(resTool, data.creativePlanId);
+    // selectedCandidateFrames：用户在确认弹窗里可选勾选的 Episode 候选素材帧文件名，不选就是空数组
+    socket.on("bridgeCut:assemblePlayable", async (data: { creativePlanId: number; selectedCandidateFrames?: string[] }) => {
+      await actions.assemblePlayableAction(resTool, data.creativePlanId, data.selectedCandidateFrames ?? []);
     });
 
     // bridgeCut:customGameGenerate —— 独立入口，不接聊天路由，用户在这个入口里已经明确表达了意图
-    socket.on("bridgeCut:customGameGenerate", async (data: { bridgeCutId: number; description: string }) => {
-      await actions.generateCustomGameAction(resTool, data.bridgeCutId, data.description);
+    socket.on("bridgeCut:customGameGenerate", async (data: { bridgeCutId: number; description: string; selectedCandidateFrames?: string[] }) => {
+      await actions.generateCustomGameAction(resTool, data.bridgeCutId, data.description, data.selectedCandidateFrames ?? []);
     });
 
     // content:confirm —— 按钮点击和聊天触发共用 actions.confirmContentAction

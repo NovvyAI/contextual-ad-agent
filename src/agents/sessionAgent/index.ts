@@ -7,7 +7,7 @@ import u from "@/utils";
 import ResTool from "@/socket/resTool";
 import { revisePlan } from "@/agents/directorAgent";
 import { reviseDraftCut, reviseStageBMotion } from "@/agents/videoGenAgent";
-import { revisePlayable } from "@/agents/playableAgent";
+import { revisePlayable, reviseCustomGame } from "@/agents/playableAgent";
 import * as actions from "@/agents/sessionAgent/actions";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
@@ -109,7 +109,10 @@ function createTools(ctx: AgentContext) {
   });
 
   const run_sub_agent_playable_revise = tool({
-    description: "根据用户反馈重新生成互动小游戏内容，仅在用户针对某个具体游戏 cut 提出修改意见时调用",
+    description:
+      "根据用户反馈重新生成互动小游戏内容，仅在这个 cut 是默认的翻牌配对（不是自定义生成的游戏）时调用。" +
+      "如果这个 cut 是走「自定义玩法生成」产出的自定义游戏，应该改用 run_sub_agent_custom_game_revise，不要用这个工具。" +
+      "如果不确定这个 cut 是哪种，直接调用即可——函数自己会校验，不是自定义游戏的话不会报错。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
     execute: async ({ bridgeCutId, feedback }) => {
       const updated = await revisePlayable(bridgeCutId, feedback);
@@ -123,6 +126,32 @@ function createTools(ctx: AgentContext) {
       });
       gameMsg.complete();
       return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的预览已推送给用户查看。`;
+    },
+  });
+
+  const run_sub_agent_custom_game_revise = tool({
+    description:
+      "根据用户反馈调整一个已经用「自定义玩法生成」产出的游戏，仅在这个 cut 是自定义生成的游戏时调用" +
+      "（比如「太难了，调整通关条件」「这个玩法节奏太慢」「换个视觉风格」）。" +
+      "如果这个 cut 是默认的翻牌配对，应该改用 run_sub_agent_playable_revise，不要用这个工具。" +
+      "这次调整如果失败（比如自动化验证没通过），原来能玩的游戏会保持不变，不会被替换成默认版本。",
+    inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
+    execute: async ({ bridgeCutId, feedback }) => {
+      const result = await reviseCustomGame(bridgeCutId, feedback);
+      if (!result.success) {
+        return `自定义游戏调整未成功：${result.reviseFailedReason}`;
+      }
+      const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
+      gameMsg.contentCandidate({
+        bridgeCutId: result.bridgeCutId,
+        type: "playableGame",
+        previewUrl: result.previewUrl!,
+        evaluatorScore: result.evaluatorScore!,
+        evaluatorFeedback: result.evaluatorFeedback,
+        custom: true,
+      });
+      gameMsg.complete();
+      return `已根据反馈调整自定义游戏 ${bridgeCutId}。新的预览已推送给用户查看。`;
     },
   });
 
@@ -179,6 +208,7 @@ function createTools(ctx: AgentContext) {
     run_sub_agent_bridge_video_revise,
     run_sub_agent_bridge_video_revise_motion,
     run_sub_agent_playable_revise,
+    run_sub_agent_custom_game_revise,
     run_confirm_plan,
     run_generate_content,
     run_confirm_draft_cuts,
@@ -197,7 +227,17 @@ async function buildPlansContext(episodeId: number): Promise<string> {
   const planIds = plans.map((p: any) => p.id);
   const cuts = planIds.length ? await u.db("ab_bridgeCut").whereIn("creativePlanId", planIds).orderBy("id") : [];
   const cutLines = cuts.length
-    ? cuts.map((c: any) => `- 内容 cut id=${c.id} 所属方案=${c.creativePlanId} 类型=${c.type} status=${c.status}`)
+    ? cuts.map((c: any) => {
+        let variant = "";
+        if (c.type === "playableGame" && c.scriptText) {
+          try {
+            variant = JSON.parse(c.scriptText).gameType ? "（自定义生成）" : "（默认翻牌配对）";
+          } catch {
+            // scriptText 解析失败就不标注，不影响其余信息展示
+          }
+        }
+        return `- 内容 cut id=${c.id} 所属方案=${c.creativePlanId} 类型=${c.type}${variant} status=${c.status}`;
+      })
     : ["（暂无）"];
 
   return `## 当前阶段\nworkflowStage=${episode?.workflowStage ?? "未知"}\n\n## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;

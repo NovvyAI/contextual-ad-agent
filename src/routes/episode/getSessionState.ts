@@ -53,6 +53,17 @@ export default router.post(
       }),
     );
 
+    const episodeAnalysis = episode.episodeAnalysis ? JSON.parse(episode.episodeAnalysis) : null;
+    // tileCandidates 落库的是帧文件名，这里拼成可直接展示的 url（和其他图片/视频字段的做法一致，不让前端自己猜路径）
+    if (episodeAnalysis?.tileCandidates?.length) {
+      episodeAnalysis.tileCandidateImages = await Promise.all(
+        episodeAnalysis.tileCandidates.map(async (filename: string) => ({
+          filename,
+          url: await u.oss.getFileUrl(`${episodeId}/frames/${filename}`, "episode"),
+        })),
+      );
+    }
+
     const manifestRow = await u.db("ab_manifest").where("episodeId", episodeId).orderBy("createTime", "desc").first();
     let manifest: { id: number; type: string; deliverableUrl: string; ctaUrl?: string } | null = null;
     if (manifestRow?.manifestJson && manifestRow.id != null) {
@@ -74,7 +85,7 @@ export default router.post(
           workflowStage: episode.workflowStage,
           durationMs: episode.durationMs,
           createTime: episode.createTime,
-          episodeAnalysis: episode.episodeAnalysis ? JSON.parse(episode.episodeAnalysis) : null,
+          episodeAnalysis,
         },
         creativePlans,
         bridgeCuts,

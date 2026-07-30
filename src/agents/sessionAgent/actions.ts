@@ -15,7 +15,7 @@ import ResTool from "@/socket/resTool";
 
 // 按 cut 类型派发到对应执行 Agent 并推卡片——generateContentAction 首次生成、bridgeCut:retry 重试失败的 cut、
 // assemblePlayableAction 手动确认组装小游戏，三处共用
-export async function generateCutContent(resTool: ResTool, cut: { id: number; index: number; type: string }): Promise<void> {
+export async function generateCutContent(resTool: ResTool, cut: { id: number; index: number; type: string }, selectedCandidateFrames: string[] = []): Promise<void> {
   if (cut.type === "video") {
     const result = await videoGenAgent.generateDraftCut(cut.id);
     const msg = resTool.newMessage("assistant", "桥接视频");
@@ -30,7 +30,7 @@ export async function generateCutContent(resTool: ResTool, cut: { id: number; in
     });
     msg.complete();
   } else if (cut.type === "playableGame") {
-    const result = await playableAgent.assemblePlayable(cut.id);
+    const result = await playableAgent.assemblePlayable(cut.id, selectedCandidateFrames);
     const msg = resTool.newMessage("assistant", "互动游戏");
     msg.contentCandidate({
       bridgeCutId: cut.id,
@@ -113,7 +113,7 @@ export async function confirmDraftCutsAction(resTool: ResTool, creativePlanId: n
 }
 
 /** M7 新增的手动确认点：video 段成片渲染完之后，不自动直通，等用户主动确认才组装小游戏 */
-export async function assemblePlayableAction(resTool: ResTool, creativePlanId: number): Promise<void> {
+export async function assemblePlayableAction(resTool: ResTool, creativePlanId: number, selectedCandidateFrames: string[] = []): Promise<void> {
   const msg = resTool.newMessage("assistant");
   try {
     const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId);
@@ -129,7 +129,7 @@ export async function assemblePlayableAction(resTool: ResTool, creativePlanId: n
     msg.complete();
 
     try {
-      await generateCutContent(resTool, { id: gameCut.id, index: gameCut.index ?? 0, type: "playableGame" });
+      await generateCutContent(resTool, { id: gameCut.id, index: gameCut.index ?? 0, type: "playableGame" }, selectedCandidateFrames);
     } catch (genErr) {
       console.error(`[sessionAgent] bridgeCut ${gameCut.id}（playableGame）组装失败:`, u.error(genErr).message);
       const errMsg = resTool.newMessage("assistant");
@@ -145,14 +145,14 @@ export async function assemblePlayableAction(resTool: ResTool, creativePlanId: n
  * 和 assemblePlayableAction 平级、互不影响：这是用户主动选的另一条路，不是替换默认流程。
  * 不接 SessionAgent 的聊天路由——用户点开这个入口本身已经消除了意图歧义，不需要再让 LLM 分类判断。
  */
-export async function generateCustomGameAction(resTool: ResTool, bridgeCutId: number, description: string): Promise<void> {
+export async function generateCustomGameAction(resTool: ResTool, bridgeCutId: number, description: string, selectedCandidateFrames: string[] = []): Promise<void> {
   const msg = resTool.newMessage("assistant");
   try {
     const text = msg.text("已收到自定义玩法描述，开始生成，可能需要一点时间。");
     text.complete();
     msg.complete();
 
-    const result = await playableAgent.generateCustomGame(bridgeCutId, description);
+    const result = await playableAgent.generateCustomGame(bridgeCutId, description, selectedCandidateFrames);
     const cardMsg = resTool.newMessage("assistant", "互动游戏");
     cardMsg.contentCandidate({
       bridgeCutId: result.bridgeCutId,

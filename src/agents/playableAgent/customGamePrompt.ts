@@ -20,6 +20,21 @@ export function buildGameSpecMessages(episodeAnalysis: EpisodeAnalysis, ad: AdEn
   return [{ role: "user", content: text }];
 }
 
+export function buildGameSpecReviseMessages(
+  episodeAnalysis: EpisodeAnalysis,
+  ad: AdEntry,
+  narrative: string,
+  tone: string,
+  existing: GameSpec,
+  feedback: string,
+): ModelMessage[] {
+  const text =
+    `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 当前游戏设计规格\n${formatSpec(existing)}\n\n## 用户反馈\n${feedback}\n\n` +
+    `请根据反馈修改这份规格，反馈没提到的部分保持原样，不要顺带改动无关内容。通关条件依然要写得具体、可判定。` +
+    `如果为了满足反馈又做了新的假设，同样要在 assumptions 里如实列出来。`;
+  return [{ role: "user", content: text }];
+}
+
 function formatSpec(spec: GameSpec): string {
   const assetLines = spec.assetsNeeded.length
     ? spec.assetsNeeded.map((a, i) => `- 素材${i + 1}：${a.description}（需要 ${a.count} 张）`).join("\n")

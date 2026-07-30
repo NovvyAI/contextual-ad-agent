@@ -132,6 +132,21 @@ export default async function startServe(randomPort: Boolean = false) {
     express.static(skillsDir, { acceptRanges: false }),
   );
 
+  // episode 抽帧静态资源（供前端展示候选素材缩略图）
+  const episodeDir = u.getPath("episode");
+  if (!fs.existsSync(episodeDir)) {
+    fs.mkdirSync(episodeDir, { recursive: true });
+  }
+  console.log("文件目录:", episodeDir);
+  // 只允许图片文件访问
+  app.use(
+    "/episode",
+    (req, res, next) => {
+      /\.(jpe?g|png|gif|webp|svg|ico|bmp)$/i.test(req.path) ? next() : res.status(403).end();
+    },
+    express.static(episodeDir, { acceptRanges: false }),
+  );
+
   // assets 静态资源
   const assetsDir = u.getPath("assets");
   if (!fs.existsSync(assetsDir)) {

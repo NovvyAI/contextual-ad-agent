@@ -61,25 +61,59 @@ function findAdReferenceFrame(adId: number, sourceType: string | null, sourceFil
   return null;
 }
 
+/**
+ * 游戏内容组装完之后回头衔接视频用的参考图：同方案下已组装完成（status=done）的 playableGame cut
+ * 的第一张真实素材图——自定义生成的取 custom_0.png，默认翻牌配对的取 tiles/tile_src_0.{jpg,png}
+ * （判断依据和别处一致：scriptText 能解析出 gameType 字段就是自定义生成）。用真实生成过的素材而不是
+ * 凭空描述，用户说"结尾呼应一下卡面素材"这类反馈时，模型这次真的看得到具体是什么图。
+ */
+async function findGameAssetReferenceFrame(creativePlanId: number): Promise<string | null> {
+  const gameCut = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "playableGame").where("status", "done").first();
+  if (!gameCut) return null;
+
+  let isCustom = false;
+  if (gameCut.scriptText) {
+    try {
+      isCustom = typeof JSON.parse(gameCut.scriptText).gameType === "string";
+    } catch {}
+  }
+  const assetsDir = `bridgeCut/${gameCut.id}/playable/game/assets`;
+  const candidates = isCustom ? [`${assetsDir}/custom_0.png`] : [`${assetsDir}/tiles/tile_src_0.jpg`, `${assetsDir}/tiles/tile_src_0.png`];
+  for (const relPath of candidates) {
+    if (await u.oss.fileExists(relPath)) return relPath;
+  }
+  return null;
+}
+
 interface ReferenceBundle {
   refs: { type: "image"; base64: string }[];
   hasEpisodeFrame: boolean;
   hasAdFrame: boolean;
+  hasGameAssetFrame: boolean;
 }
 
-async function buildReferenceList(episodeId: number, adId: number, ad: AdEntry): Promise<ReferenceBundle> {
+async function buildReferenceList(episodeId: number, adId: number, ad: AdEntry, creativePlanId: number): Promise<ReferenceBundle> {
   const adRow = await u.db("ab_ad").where("id", adId).first();
   const refs: { type: "image"; base64: string }[] = [];
   const episodeFrame = findEpisodeLastFrame(episodeId);
   if (episodeFrame) refs.push({ type: "image", base64: fileToBase64(episodeFrame) });
   const adFrame = findAdReferenceFrame(adId, ad.sourceType, adRow?.sourceFilePath ?? null, ad.tileCandidates);
   if (adFrame) refs.push({ type: "image", base64: fileToBase64(adFrame) });
-  return { refs, hasEpisodeFrame: episodeFrame != null, hasAdFrame: adFrame != null };
+  const gameAssetRelPath = await findGameAssetReferenceFrame(creativePlanId);
+  if (gameAssetRelPath) refs.push({ type: "image", base64: (await u.oss.getFile(gameAssetRelPath)).toString("base64") });
+  return { refs, hasEpisodeFrame: episodeFrame != null, hasAdFrame: adFrame != null, hasGameAssetFrame: gameAssetRelPath != null };
 }
 
-async function renderDraftImage(bridgeCutId: number, episodeId: number, adId: number, ad: AdEntry, draft: StageADraft): Promise<{ imageUrl: string; assembledPrompt: string }> {
-  const { refs, hasEpisodeFrame, hasAdFrame } = await buildReferenceList(episodeId, adId, ad);
-  const assembledPrompt = assembleStageAPrompt(draft, hasEpisodeFrame, hasAdFrame);
+async function renderDraftImage(
+  bridgeCutId: number,
+  episodeId: number,
+  adId: number,
+  ad: AdEntry,
+  draft: StageADraft,
+  creativePlanId: number,
+): Promise<{ imageUrl: string; assembledPrompt: string }> {
+  const { refs, hasEpisodeFrame, hasAdFrame, hasGameAssetFrame } = await buildReferenceList(episodeId, adId, ad, creativePlanId);
+  const assembledPrompt = assembleStageAPrompt(draft, hasEpisodeFrame, hasAdFrame, hasGameAssetFrame);
   const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
   const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
     {
@@ -125,7 +159,7 @@ export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutRes
       { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft);
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
     return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
@@ -153,7 +187,7 @@ export async function reviseDraftCut(bridgeCutId: number, feedback: string): Pro
       { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft);
+    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
     await recordRevise("bridgeCutDraft", bridgeCutId, feedback, existing, draft);
     return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
   } catch (e) {

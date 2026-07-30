@@ -3,7 +3,7 @@ import type { ContentCandidateContent } from "@/types/chatMessagesData";
 
 defineProps<{ content: ContentCandidateContent; episodeId: number }>();
 
-const typeLabel: Record<string, string> = { playableGame: "H5 小游戏", ctaCard: "CTA 卡片" };
+const typeLabel: Record<string, string> = { playableGame: "H5 小游戏" };
 </script>
 
 <template>
@@ -16,8 +16,7 @@ const typeLabel: Record<string, string> = { playableGame: "H5 小游戏", ctaCar
       <div v-if="content.data.fallback && content.data.fallbackReason" style="font-size: 13px; color: var(--td-warning-color, #ed7b2f)">
         {{ content.data.fallbackReason }}
       </div>
-      <iframe v-if="content.data.type === 'playableGame'" :src="content.data.previewUrl" style="width: 100%; height: 320px; border: none; border-radius: 6px" />
-      <img v-else :src="content.data.previewUrl" style="width: 100%; border-radius: 6px" alt="CTA 卡片" />
+      <iframe :src="content.data.previewUrl" style="width: 100%; height: 320px; border: none; border-radius: 6px" />
       <div v-if="content.data.ctaUrl"><b>跳转链接：</b><a :href="content.data.ctaUrl" target="_blank" rel="noopener">{{ content.data.ctaUrl }}</a></div>
       <div><b>参考分：</b>{{ content.data.evaluatorScore }}</div>
       <div v-if="content.data.evaluatorFeedback" style="font-size: 13px; color: var(--td-text-color-secondary, #666)">
