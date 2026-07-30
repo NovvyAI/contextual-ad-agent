@@ -42,8 +42,15 @@ export async function analyzeEpisode(episodeId: number): Promise<void> {
       messages,
     });
 
+    // 只匹配 fullFrames（覆盖全片的稀疏采样），不匹配 tailFrames——候选素材要的是"人物/场景长什么样"，
+    // tailFrames 只密集采样结尾，前者更适合找有代表性的角色/场景画面
+    const tileCandidates = (object.tileCandidateFrameIndices ?? [])
+      .map((i) => fullFrames.find((f) => f.index === i))
+      .filter((f): f is (typeof fullFrames)[number] => f != null)
+      .map((f) => path.basename(f.path));
+
     await u.db("ab_episode").where("id", episodeId).update({
-      episodeAnalysis: JSON.stringify(object),
+      episodeAnalysis: JSON.stringify({ ...object, tileCandidates }),
       status: "analyzed",
     });
   } catch (e) {

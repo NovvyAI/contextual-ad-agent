@@ -86,7 +86,7 @@ export type SupervisorResultContent = ChatBaseContent<
 // M4：Assembler 组装完成后的最终交付物
 export type ManifestContent = ChatBaseContent<
   "manifest",
-  { manifestId: number; episodeId: number; creativePlanId: number; type: string; deliverableUrl: string; ctaUrl?: string }
+  { manifestId: number; episodeId: number; creativePlanId: number; type: "video" | "playableGame"; deliverableUrl: string; ctaUrl?: string }
 >;
 
 export type AIMessageContent =

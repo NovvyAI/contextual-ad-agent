@@ -29,14 +29,7 @@
 
 - ✅ **M7** — 重新设计桥接流程：三选一形式（video/playableGame/ctaCard）改成固定两段式管线（过渡视频→H5 小游戏），Episode 分析加了观众情绪维度，新增手动确认组装小游戏的交互点（详见 `docs/milestones/M7.md`）
 - ✅ **M8** — 真实游戏内容管线：AdLibraryAgent 分析视频广告时顺带挑出真实游戏截图（`tileCandidates`），PlayableAgent 配对小游戏素材优先用这些真实截图（不够才回退 AI 生成），VideoGenAgent 选广告参考图优先用这些已验证的帧，SupervisorAgent 对 `playableGame` 的终审这次真的会看一张实际画面（详见 `docs/milestones/M8.md`）
-
-M8 之后规划了 M9，目前包含三块：
-① 前端针对固定两段式流程的展示精修；
-② 自定义玩法生成（`PlayableAgent.generateCustomGame`）目前没有 revise 机制，不满意只能整个重新生成，计划补一版"现有 GameSpec + 用户反馈 → 调整后的 GameSpec，按需重新生成代码"的 revise（同一套模式在方案/分镜草案/翻牌配对 revise 上都已经用过）；
-③ **Episode / 视频 / 游戏之间的视觉素材传承与关联**——现在这三者的视觉内容完全互不相干，没有代码把它们关联起来。计划包含两个方向：
-  - **游戏生成时，从 Episode 里继承候选素材**：StoryboardAgent 现在抽帧只用来做分析，没有像 M8 给 AdLibraryAgent 加的 `tileCandidates` 那样，标记"哪几帧适合直接当角色/场景素材候选"。计划给 StoryboardAgent 补一个类似字段，挑出清晰展示主要角色/场景的候选帧。生成游戏素材（默认翻牌配对的卡面，或自定义游戏 `GameSpec.assetsNeeded`）时，把这些候选素材**展示给用户，让用户自己选**用哪些去生成，不是系统自动选或者忽略——这和这个项目一贯"确定性的选择交给用户，不该由 LLM/代码隐式决定"的原则一致。选中的候选帧不直接复制使用（M8 踩过这个坑：原始截图硬塞进结构化素材槽位，风格和构图对不上），而是当参考图喂给 `u.Ai.Image(...).run({ referenceList })`（Stage A 草案图已经是这么用参考图的），生成风格匹配游戏、但保留真实角色/场景样貌的干净素材。
-  - **游戏生成完之后，回头对视频做一次 revise**：不是让 video 提前猜游戏画面，而是游戏内容确定之后，扩展现有的 `reviseDraftCut`/`run_sub_agent_bridge_video_revise`——`buildReferenceList` 在游戏已组装的场景下额外把游戏卡面素材当参考图塞进去，让视频结尾呼应这些已经生成好的真实素材（比如"卡面头像分裂、打乱、落到棋盘上"这种衔接），模型是真的看着这些图去画，不是凭文字描述瞎猜。
-具体实现细节还没有展开，等真正开始做的时候再规划。
+- ✅ **M9** — 前端展示精修（删掉 M7 遗留的 ctaCard 死代码）、自定义游戏 revise（`PlayableAgent.reviseCustomGame`，失败时保留原有可玩游戏不动）、Episode/视频/游戏视觉素材传承（StoryboardAgent 新增候选素材 `tileCandidates`，生成游戏素材时让用户勾选这些真实画面作为参考图，游戏组装完成后视频 revise 能回头呼应已生成的真实游戏素材）（详见 `docs/milestones/M9.md`）
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
