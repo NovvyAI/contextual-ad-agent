@@ -140,6 +140,51 @@ export async function assemblePlayableAction(resTool: ResTool, creativePlanId: n
   }
 }
 
+/**
+ * 独立入口——用户描述想要的玩法（可长可短），走开放式生成（LLM 现场写游戏代码 + 自动化冒烟测试 + 失败回退翻牌配对）。
+ * 和 assemblePlayableAction 平级、互不影响：这是用户主动选的另一条路，不是替换默认流程。
+ * 不接 SessionAgent 的聊天路由——用户点开这个入口本身已经消除了意图歧义，不需要再让 LLM 分类判断。
+ */
+export async function generateCustomGameAction(resTool: ResTool, bridgeCutId: number, description: string): Promise<void> {
+  const msg = resTool.newMessage("assistant");
+  try {
+    const text = msg.text("已收到自定义玩法描述，开始生成，可能需要一点时间。");
+    text.complete();
+    msg.complete();
+
+    const result = await playableAgent.generateCustomGame(bridgeCutId, description);
+    const cardMsg = resTool.newMessage("assistant", "互动游戏");
+    cardMsg.contentCandidate({
+      bridgeCutId: result.bridgeCutId,
+      type: "playableGame",
+      previewUrl: result.previewUrl,
+      evaluatorScore: result.evaluatorScore,
+      evaluatorFeedback: result.evaluatorFeedback,
+      custom: !result.fallback,
+      fallback: result.fallback,
+      fallbackReason: result.fallbackReason,
+    });
+    cardMsg.complete();
+
+    if (result.fallback) {
+      const fallbackMsg = resTool.newMessage("assistant");
+      const fallbackText = fallbackMsg.text(`自定义玩法生成未成功（${result.fallbackReason}），已提供默认的翻牌配对版本。`);
+      fallbackText.complete();
+      fallbackMsg.complete();
+    } else if (result.spec?.assumptions.length) {
+      // 描述里没说清楚的地方，模型做了假设——如实告诉用户，不要悄悄决定，用户觉得不对可以调整描述重新生成
+      const assumptionMsg = resTool.newMessage("assistant");
+      const assumptionText = assumptionMsg.text(`有几处你的描述里没说清楚，生成时做了假设：\n${result.spec.assumptions.map((a) => `- ${a}`).join("\n")}\n如果不符合预期，可以调整描述后重新点击「自定义玩法生成」。`);
+      assumptionText.complete();
+      assumptionMsg.complete();
+    }
+  } catch (err) {
+    console.error(`[sessionAgent] bridgeCut ${bridgeCutId} 自定义玩法生成失败:`, u.error(err).message);
+    const errMsg = resTool.newMessage("assistant");
+    errMsg.error(`自定义玩法生成失败：${u.error(err).message}`);
+  }
+}
+
 /** 落地前终审 + 落地组装 */
 export async function confirmContentAction(resTool: ResTool, episodeId: number, creativePlanId: number): Promise<void> {
   const msg = resTool.newMessage("assistant");

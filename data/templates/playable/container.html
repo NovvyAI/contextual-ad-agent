@@ -94,6 +94,7 @@ window.PLAYABLE_CONFIG = /*INJECT*/{}/*END*/;
     var frame = document.createElement("iframe");
     frame.id = "gameframe";
     frame.allow = "autoplay";
+    frame.sandbox = "allow-scripts"; // 不给 allow-same-origin，游戏内容拿到的是不透明源，接触不到容器/父页面的存储和 cookie
     frame.src = "game/index.html";
     document.getElementById("gamewrap").appendChild(frame);
     show("gamewrap");

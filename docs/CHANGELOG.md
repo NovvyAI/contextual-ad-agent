@@ -12,6 +12,25 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-30 新增"自定义玩法生成"独立入口——LLM 现场写游戏代码 + 自动化冒烟测试 + 失败回退翻牌配对
+
+**用户意见 / 触发原因**：PlayableAgent 的互动小游戏一直是翻牌配对（M3 照搬 Python 参考实现的模板），用户希望小游戏"多种多样，根据用户自己设计的"。讨论了三条路径（`docs/design-playable-game-type-options.md`）——多模板+确定性选型、LLM 现场生成游戏代码、外部 H5 包模式——用户在充分了解"LLM 写代码"这条路的安全/正确性/可维护性风险后，明确选择推进这条路径。设计过程中定下几个关键取舍：不做多轮追问式设计会话（成本太高），改成"确认组装小游戏"按钮旁边一个平级的独立入口，不接 SessionAgent 聊天路由；用户描述可长可短，不限定"一句话"；LLM 做了假设/默认选择时要如实告诉用户（`assumptions` 字段），不悄悄替用户做决定。
+
+**改了什么**：
+- 新依赖 `playwright`（这台机器 macOS 版本太旧，Playwright 自带 Chromium 不支持，改用 `channel:"chrome"` 驱动机器上已装的真实 Chrome，见 CLAUDE.md）。
+- `src/agents/playableAgent/customGameSchema.ts`/`customGamePrompt.ts`（新增）：`gameSpecSchema`（`title`/`ctaUrl`/`gameType`/`objective`/`boardLayout`/`interactionRules`/`assetsNeeded`/`assumptions`），`buildGameSpecMessages`（用户描述 + 广告 `coreMechanic` 展开成结构化规格）、`buildGameCodeMessages`（按规格生成游戏代码，支持把上一次失败原因喂回去重试）。新增技能文件 `playable_custom_gamespec.md`/`playable_custom_codegen.md`。
+- `src/utils/gameSmokeTest.ts`（新增）：`runGameSmokeTest(html)` 用 Playwright 加载生成出的 HTML，监听 `pageerror`/`console.error`，等待 `game_ready` postMessage 或超时，只做冒烟级别验证（页面能不能正常跑），不验证玩法逻辑本身对不对——这是这条路径承认的已知局限。
+- `src/agents/playableAgent/index.ts`：`assemble()` 里"组装收尾"那部分（拷贝片头视频、注入容器页、落库）抽成共用的 `finalizePlayablePackage()`；新增 `generateCustomGame(bridgeCutId, description)`——GameSpec 生成 → 素材获取（按规格里每条具体描述单独用 gpt-image-1 生成，不复用 `tileCandidates`，见下面"踩的坑"）→ 代码生成 → 冒烟测试，不通过就把报错喂回去重试（最多 2 次），重试耗尽或任何一步意外失败都直接调用现有的 `assemblePlayable()` 兜底，保证总有产物可交付。
+- `data/templates/playable/container.html`：游戏 iframe 加 `sandbox="allow-scripts"`（不给 `allow-same-origin`），缩小万一生成代码有问题时的影响范围。
+- `src/socket/routes/sessionAgent.ts` + `src/agents/sessionAgent/actions.ts`：新增 `bridgeCut:customGameGenerate` 事件 + `generateCustomGameAction`，推卡片时带上是否自定义/是否回退的标记，`assumptions` 非空时额外发一条文字消息告诉用户做了哪些假设。
+- 前端：`ActionBar.vue` 在"确认组装小游戏"旁边加平级的"自定义玩法生成"按钮，弹窗收集描述（鼓励详细描述，不限定一句话）；`ContentCandidateCard.vue` 展示"自定义生成"/"已回退默认版本"标签。`ContentCandidateContent` 类型（`src/socket/chatMessagesData.d.ts` + `frontend/src/types/chatMessagesData.ts`）加 `custom`/`fallback`/`fallbackReason` 可选字段。
+
+**踩的坑**：第一版 `acquireCustomGameAssets` 复用了翻牌配对路径"真实截图优先"的逻辑，把 `tileCandidates`（AdLibraryAgent 挑出的完整游戏界面截图）直接塞进 GameSpec 的结构化素材槽位。真实测试一个三消游戏时，发现棋盘上有 2 颗"糖果"实际上是缩小的完整游戏界面截图，和其他棋子风格完全不搭——翻牌配对的素材槽位是同质的（随便一张有辨识度的图都行），但自定义游戏的槽位有具体描述（"单个独立糖果图标"/"棋盘背景"），不能用通用截图硬填。修复：自定义游戏的素材永远按每条具体描述单独用 gpt-image-1 生成，不复用 `tileCandidates`。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 全程 clean。真实调用 `generateCustomGame`：①"找不同"描述（无需素材，纯 SVG/CSS）首次尝试即通过冒烟测试，浏览器实际通关验证——5 处差异全部能正确点选识别、完成后弹出"信号恢复"结束卡，`sandbox="allow-scripts"` 的 iframe 里交互和跨帧 `postMessage` 均正常；②"三消"描述（需要 12 张素材图，走真实 gpt-image-1 生成），发现并修复了上述截图错配问题后，重新验证棋盘素材全部是风格一致的 AI 生成图标，swap 交互和"不成对就自动复位不扣步数"的规则均符合规格。重试反馈机制单独验证：用一个环境变量临时让冒烟测试强制失败（验证完后已移除），确认失败原因正确地被拼进下一次生成的 prompt（"上一次生成失败的原因：……请修正这个问题"）。这次验证过程中连续 5 次撞到同一个上游服务临时不可用的报错（`Upstream service temporarily unavailable`），和这次改动无关——每次都能看到代码正确走到了预期的重试/兜底分支，只是兜底调用本身也需要真实模型调用，撞上了当时确实存在的服务不稳定；后续应该找一个 API 更稳定的时间窗口，再补一次"冒烟测试失败 → 干净地回退成功"的完整链路验证。
+
+---
+
 ## 2026-07-29 四条 revise 流程统一加历史记录，留给以后做训练数据
 
 **用户意见 / 触发原因**：讨论方案 revise 是"原地覆盖，旧版本不保留"时，用户问能不能想办法保留，以后做训练用。排查发现问题比方案这一处更大——四条 revise 流程（方案/分镜草案/运镜专用/小游戏配置）里，用户反馈的原文本身哪里都没有落库，只是喂给模型就丢了；方案的 revise 还是直接 `UPDATE` 覆盖旧值。这两个缺口都会让"根据反馈修改内容"这个任务将来没有干净的训练样本可用。

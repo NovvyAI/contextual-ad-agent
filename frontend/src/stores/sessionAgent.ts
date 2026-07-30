@@ -87,6 +87,9 @@ function makeSessionAgentStore(episodeId: number) {
     function assemblePlayableCut(creativePlanId: number) {
       chat.socket.value?.emit("bridgeCut:assemblePlayable", { creativePlanId });
     }
+    function generateCustomGame(bridgeCutId: number, description: string) {
+      chat.socket.value?.emit("bridgeCut:customGameGenerate", { bridgeCutId, description });
+    }
     function confirmContent(creativePlanId: number) {
       chat.socket.value?.emit("content:confirm", { creativePlanId });
     }
@@ -104,6 +107,7 @@ function makeSessionAgentStore(episodeId: number) {
       generateBridgeCuts,
       confirmBridgeCuts,
       assemblePlayableCut,
+      generateCustomGame,
       confirmContent,
       retryBridgeCut,
     };
