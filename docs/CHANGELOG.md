@@ -22,6 +22,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-29 SessionAgent 不再把运行时状态伪装成 assistant 消息
+
+**触发原因**：同事指出 `runDecisionAI` 把 `buildPlansContext()` 现查出来的运行时状态（workflowStage/方案列表/cut 列表）塞进一条 `role:"assistant"` 消息里喂给模型，语义上不干净——`assistant` 角色代表"模型之前说过的话"，不是"框架提供的可信状态"，长期会有三个问题：模型可能把状态当成自己的既有结论、用户内容和系统状态的信任边界不清、调试时分不清真实对话和系统注入。第三条这次直接能验证——查现成的大模型调用日志，`messages` 里确实原样打印出一条看起来像模型说过的假 assistant 消息，容易误导看日志的人。同事同时提议一套结构化的 Runtime Context Envelope（`schemaVersion`/`runId`/各类 revisionId/`workflowInvariants` 等），评估下来这套 schema 里的"版本化""run 追踪"这些概念在这个项目里都还不存在，照搬需要先建一整套版本化基础设施，对这次要解决的"消息角色语义不干净"这个问题来说是过度设计。
+
+**改了什么**：`src/agents/sessionAgent/index.ts` 的 `runDecisionAI`——`plansContext` 不再塞进一条伪造的 `{role:"assistant"}` 消息，改成拼进 `system` 字符串（技能文件内容 + 换行 + 这段动态状态），`messages` 数组只保留真实的 `{role:"user", content: 用户原话}`。"每次现查现拼" 这个已经做对的部分完全不受影响，只是运行时状态挪了个位置。
+
+**验证**：`npx tsc --noEmit -p .` clean。真实调用 `runDecisionAI`（用假 socket 的 `ResTool` 触发真实的 LLM 调用），查大模型调用日志确认：`system` 字段末尾正确追加了 `## 当前阶段\nworkflowStage=content_review\n\n## 当前创意方案\n...\n\n## 当前内容 cut\n...`，`messages` 数组只有一条真实的用户消息，没有伪造的 assistant 消息；模型基于 `system` 里的状态正确回答了"现在方案状态怎么样了"，方案/cut 的状态描述和真实 DB 数据一致，证明挪位置之后模型依然能正确读取这段上下文。
+
+---
+
 ## 2026-07-29 新增"只改运镜/节奏"的成片 revise 路径，和"重新生成草案"并列为用户可选的两种 revise
 
 **用户意见 / 触发原因**：追问 revise 机制时发现一个真实缺口——成片渲染完之后，任何反馈（不管是"头发乱了"这种画面内容问题，还是"运镜太快了"这种纯运镜/节奏问题）都只能走 `reviseDraftCut`，即整份分镜草案重新生成、图片重新画一遍、还要用户重新走一遍确认分镜→渲染成片的流程。对于纯运镜/节奏类反馈这是不必要的开销——草案图已经确认过，画面内容没有问题，理论上只需要重新渲染 Stage B。用户明确要求给用户一个显式的二选一（只改运镜节奏 / 重新生成草案），不要让 SessionAgent 自己猜该走哪条路径。

@@ -205,15 +205,16 @@ async function buildPlansContext(episodeId: number): Promise<string> {
 
 export async function runDecisionAI(ctx: AgentContext): Promise<void> {
   const skillPath = path.join(u.getPath("skills"), "session_agent_decision.md");
-  const systemPrompt = await fs.promises.readFile(skillPath, "utf-8");
+  const skillPrompt = await fs.promises.readFile(skillPath, "utf-8");
   const plansContext = await buildPlansContext(ctx.episodeId);
+  // 当前运行时状态不伪装成 assistant 说过的话——那个角色语义上代表"模型之前的输出"，
+  // 硬塞运行时状态进去容易让模型把它当成自己的既有结论，调试时也分不清是真实对话还是系统注入。
+  // 挪进 system 里，和用户消息严格分开，语义清楚：这是框架每次现查现拼给模型看的当前状态，不是对话历史。
+  const systemPrompt = `${skillPrompt}\n\n${plansContext}`;
 
   const { fullStream } = await u.Ai.Text(MODEL_KEY).stream({
     system: systemPrompt,
-    messages: [
-      { role: "assistant", content: plansContext },
-      { role: "user", content: ctx.text },
-    ],
+    messages: [{ role: "user", content: ctx.text }],
     abortSignal: ctx.abortSignal,
     tools: createTools(ctx),
   });
