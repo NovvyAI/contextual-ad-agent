@@ -10,11 +10,21 @@ const props = defineProps<{
   onGenerateContent: (creativePlanId: number) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
   onAssemblePlayable: (creativePlanId: number) => void;
+  onGenerateCustomGame: (bridgeCutId: number, description: string) => void;
   onConfirmContent: (creativePlanId: number) => void;
   onRetryBridgeCut: (bridgeCutId: number) => void;
 }>();
 
 const selectedAdIds = ref<number[]>([]);
+const customGameDialogVisible = ref(false);
+const customGameDescription = ref("");
+
+function submitCustomGame() {
+  if (!gameCut.value?.id || !customGameDescription.value.trim()) return;
+  props.onGenerateCustomGame(gameCut.value.id, customGameDescription.value.trim());
+  customGameDialogVisible.value = false;
+  customGameDescription.value = "";
+}
 
 const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) => p.status === "approved"));
 const videoCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.type === "video"));
@@ -51,12 +61,26 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
       <t-button v-else-if="approvedPlan && videoDraftsReadyToConfirm" theme="primary" :disabled="busy" @click="onConfirmBridgeCuts(approvedPlan.id)">
         确认分镜草案，开始渲染成片
       </t-button>
-      <t-button v-else-if="approvedPlan && readyToAssemblePlayable" theme="primary" :disabled="busy" @click="onAssemblePlayable(approvedPlan.id)">
-        确认组装小游戏
-      </t-button>
+      <template v-else-if="approvedPlan && readyToAssemblePlayable">
+        <t-button theme="primary" :disabled="busy" @click="onAssemblePlayable(approvedPlan.id)">确认组装小游戏</t-button>
+        <t-button theme="default" variant="outline" :disabled="busy" @click="customGameDialogVisible = true">自定义玩法生成</t-button>
+      </template>
       <t-button v-else-if="approvedPlan && allCutsDone" theme="primary" :disabled="busy" @click="onConfirmContent(approvedPlan.id)">确认内容，进入终审与落地</t-button>
       <span v-else style="color: var(--td-text-color-secondary, #666)">内容生成中...</span>
     </template>
+
+    <t-dialog
+      v-model:visible="customGameDialogVisible"
+      header="自定义玩法生成"
+      width="600px"
+      :on-confirm="submitCustomGame"
+      :confirm-btn="{ content: '开始生成', disabled: !customGameDescription.trim() }"
+    >
+      <p style="margin: 0 0 8px; color: var(--td-text-color-secondary, #666); font-size: 13px">
+        描述想要的玩法，越详细越好——玩法类型、具体规则、通关条件、难度、想用什么风格的素材图，都可以写清楚，描述越具体，生成出来的游戏越接近预期。系统会据此现场生成一个对应的小游戏；如果生成失败，会自动回退到默认的翻牌配对版本。
+      </p>
+      <t-textarea v-model="customGameDescription" placeholder="比如：找不同玩法，给两张几乎一样的游戏截图，需要在30秒内点出5处不同，每找对一处有音效反馈，全部找完弹出通关庆祝……" :autosize="{ minRows: 5, maxRows: 14 }" />
+    </t-dialog>
 
     <template v-else-if="sessionState.episode.workflowStage === 'assembling'">
       <span style="color: var(--td-success-color, #2ba471)">已完成落地</span>

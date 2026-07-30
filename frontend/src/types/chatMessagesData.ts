@@ -66,7 +66,17 @@ export type VideoCandidateContent = ChatBaseContent<
 // PlayableAgent 产出的互动游戏包候选卡片
 export type ContentCandidateContent = ChatBaseContent<
   "contentCandidate",
-  { bridgeCutId: number; type: "playableGame"; previewUrl: string; ctaUrl?: string; evaluatorScore: number; evaluatorFeedback?: string }
+  {
+    bridgeCutId: number;
+    type: "playableGame";
+    previewUrl: string;
+    ctaUrl?: string;
+    evaluatorScore: number;
+    evaluatorFeedback?: string;
+    custom?: boolean; // 是否走了自定义玩法生成（LLM 现场写游戏代码），不是默认的翻牌配对
+    fallback?: boolean; // 自定义生成失败，已回退到默认的翻牌配对
+    fallbackReason?: string;
+  }
 >;
 // M4：SupervisorAgent 落地前终审结果——真正的拦截判定，不是参考分
 export type SupervisorResultContent = ChatBaseContent<

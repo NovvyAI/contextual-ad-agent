@@ -51,3 +51,7 @@ TypeScript 全栈。后端 Express 5 + Socket.IO + SQLite（better-sqlite3 + kne
 ## 本机环境注意
 
 这台机器 Xcode 版本很旧（10.3），`brew install` 装原生依赖经常会触发从源码编译（Node.js、ffmpeg 都遇到过，ffmpeg 那次甚至编译到了 CMake 自身）。Node.js 最终是直接下载官方预编译二进制装的，不在 Homebrew 管理范围内，装在 `~/.local/opt/node`，软链进了 `~/.local/bin`。如果要装新的原生依赖遇到类似问题，参考这个思路：换官方预编译二进制，别死等 brew 编译。
+
+这台机器的 macOS 版本是 13.2.1，`playwright install chromium` 会报 "Playwright does not support chromium on mac13"（Playwright 自带的 Chromium 构建不支持这个系统版本）。机器上已经装了真实的 Google Chrome（`/Applications/Google Chrome.app`），Playwright 启动时加 `channel: "chrome"` 就能直接驱动这个已安装的 Chrome，不需要另外下载 Playwright 自带的浏览器二进制。
+
+包管理器用的是 **Yarn**（`yarn.lock` 存在，没有 `package-lock.json`），装新依赖用 `yarn add`，不要用 `npm install`——这个项目的 `@rmp135/sql-ts`（DB 类型生成用）和 `sqlite3` 之间有一个 npm 会报 `ERESOLVE` 冲突但 yarn 能正常处理的 peer dependency 不一致，不是新引入的问题。

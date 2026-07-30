@@ -120,6 +120,11 @@ export default (nsp: Namespace) => {
       await actions.assemblePlayableAction(resTool, data.creativePlanId);
     });
 
+    // bridgeCut:customGameGenerate —— 独立入口，不接聊天路由，用户在这个入口里已经明确表达了意图
+    socket.on("bridgeCut:customGameGenerate", async (data: { bridgeCutId: number; description: string }) => {
+      await actions.generateCustomGameAction(resTool, data.bridgeCutId, data.description);
+    });
+
     // content:confirm —— 按钮点击和聊天触发共用 actions.confirmContentAction
     socket.on("content:confirm", async (data: { creativePlanId: number }) => {
       await actions.confirmContentAction(resTool, episodeId, data.creativePlanId);
