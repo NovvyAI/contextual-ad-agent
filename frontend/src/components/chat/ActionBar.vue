@@ -44,14 +44,17 @@ function submitAssemblePlayable() {
 }
 
 const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) => p.status === "approved"));
-const videoCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.type === "video"));
-const hasCuts = computed(() => props.sessionState.bridgeCuts.length > 0);
+// 一个 episode 理论上不该同时有多份 approved 方案，但实际数据里出现过（历史遗留/反复测试导致）——
+// 这里按当前这份 approved 方案过滤 cut，不然混进另一份方案已经 done 的 cut，会把这些按钮状态判断全部打乱
+const currentPlanCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.creativePlanId === approvedPlan.value?.id));
+const videoCuts = computed(() => currentPlanCuts.value.filter((c) => c.type === "video"));
+const hasCuts = computed(() => currentPlanCuts.value.length > 0);
 const videoDraftsReadyToConfirm = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "draft"));
-const gameCut = computed(() => props.sessionState.bridgeCuts.find((c) => c.type === "playableGame"));
+const gameCut = computed(() => currentPlanCuts.value.find((c) => c.type === "playableGame"));
 // M7 新增的手动确认点：video 段渲染完成、小游戏段还没组装过时，才显示「确认组装小游戏」按钮，不自动直通
 const readyToAssemblePlayable = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "done") && gameCut.value?.status === "pending");
-const allCutsDone = computed(() => hasCuts.value && props.sessionState.bridgeCuts.every((c) => c.status === "done"));
-const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.status === "failed"));
+const allCutsDone = computed(() => hasCuts.value && currentPlanCuts.value.every((c) => c.status === "done"));
+const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status === "failed"));
 </script>
 
 <template>
