@@ -20,7 +20,7 @@ const selectedAdIds = ref<number[]>([]);
 // 选定之后这份方案下所有分镜草案/游戏素材生成（包括 revise）都用这个模型，不用每次调用各自决定
 const imageModelOptions = [
   { key: "openai:gpt-image-2", label: "GPT Image 2" },
-  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2)" },
+  { key: "google:gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image（官方直连）" },
 ];
 const selectedImageModelKey = ref(imageModelOptions[0].key);
 const customGameDialogVisible = ref(false);
