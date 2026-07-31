@@ -137,6 +137,7 @@ const vendor: VendorConfig = {
     { name: "GPT-5.2", modelName: "gpt-5.2", type: "text", think: false },
     { name: "GPT-5.4", modelName: "gpt-5.4", type: "text", think: false },
     { name: "GPT Image 1", modelName: "gpt-image-1", type: "image", mode: ["text", "singleImage", "multiReference"] },
+    { name: "GPT Image 2", modelName: "gpt-image-2", type: "image", mode: ["text", "singleImage", "multiReference"] },
   ],
 };
 // ============================================================
@@ -147,14 +148,14 @@ const getHeaders = () => {
   return { Authorization: `Bearer ${apiKey}` };
 };
 
-// aspectRatio（宽:高）映射到 gpt-image-1 支持的固定尺寸档位，没有正方形/竖屏/横屏之外的选项
+// aspectRatio（宽:高）映射到 gpt-image 系列支持的固定尺寸档位，没有正方形/竖屏/横屏之外的选项
 function mapSize(aspectRatio: `${number}:${number}`): "1024x1024" | "1024x1536" | "1536x1024" {
   const [w, h] = aspectRatio.split(":").map(Number);
   if (w === h) return "1024x1024";
   return w > h ? "1536x1024" : "1024x1536";
 }
 
-// gpt-image-1 没有"分辨率"档位，用 quality 近似映射 1K/2K/4K 的"越高越贵越细"语义
+// gpt-image 系列没有"分辨率"档位，用 quality 近似映射 1K/2K/4K 的"越高越贵越细"语义
 function mapQuality(size: "1K" | "2K" | "4K"): "low" | "medium" | "high" {
   return size === "1K" ? "low" : size === "2K" ? "medium" : "high";
 }
@@ -167,6 +168,11 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
   const apiKey = vendor.inputValues.apiKey.replace(/^Bearer\s+/i, "");
   return createOpenAI({ baseURL: vendor.inputValues.baseUrl, apiKey }).chat(model.modelName);
 };
+// 中转服务自己的网关一般在 120 秒左右会主动掐断没有响应的请求、抛出 "Proxy Read Timeout" 之类的错误，
+// 但实测遇到过请求卡在别的环节、既不报错也不返回、一直悬挂的情况——加一个比网关超时稍长一点的兜底，
+// 保证这类请求最终一定会失败退出，而不是无限期占着不动，用户完全看不出是卡住了还是在正常处理
+const IMAGE_REQUEST_TIMEOUT_MS = 130000;
+
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   if (!vendor.inputValues.apiKey) throw new Error("缺少API Key");
   const baseUrl = vendor.inputValues.baseUrl;
@@ -187,15 +193,28 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
       form.append("image[]", Buffer.from(b64, "base64"), { filename: `ref-${i}.png`, contentType: "image/png" });
     }
     logger(`开始提交图片编辑任务（${config.referenceList.length} 张参考图），模型：${model.modelName}`);
-    const resp = await axios.post(`${baseUrl}/images/edits`, form, { headers: { ...headers, ...form.getHeaders() } });
+    let resp: any;
+    try {
+      resp = await axios.post(`${baseUrl}/images/edits`, form, { headers: { ...headers, ...form.getHeaders() }, timeout: IMAGE_REQUEST_TIMEOUT_MS });
+    } catch (e: any) {
+      if (e?.code === "ECONNABORTED") throw new Error(`图片编辑请求超过 ${IMAGE_REQUEST_TIMEOUT_MS / 1000} 秒未响应，判定为卡住，已主动放弃`);
+      throw e;
+    }
     respJson = resp.data;
   } else {
     logger(`开始提交文生图任务，模型：${model.modelName}`);
-    const resp = await fetch(`${baseUrl}/images/generations`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: model.modelName, prompt: config.prompt, size, quality, n: 1 }),
-    });
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/images/generations`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model.modelName, prompt: config.prompt, size, quality, n: 1 }),
+        signal: AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS),
+      });
+    } catch (e: any) {
+      if (e?.name === "TimeoutError") throw new Error(`文生图请求超过 ${IMAGE_REQUEST_TIMEOUT_MS / 1000} 秒未响应，判定为卡住，已主动放弃`);
+      throw e;
+    }
     if (!resp.ok) {
       const errorReason = await resp.text();
       throw new Error(`图片生成失败：${errorReason}`);

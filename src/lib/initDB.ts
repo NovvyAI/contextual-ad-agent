@@ -219,6 +219,7 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("planEvaluatorScore");
         table.text("status"); // draft | evaluating | approved | rejected
         table.integer("createTime");
+        table.text("imageModelKey"); // 用户在内容生成前选定的图片生成模型，null 就是走系统默认
       },
     },
     // 分镜草案（已确认方案内的具体分镜/桥接段）

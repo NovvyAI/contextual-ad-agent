@@ -35,6 +35,7 @@ export default function runCode(code: string, vendor?: Record<string, any>) {
     pollTask,
     fetch: fetch,
     Response: Response,
+    AbortSignal: AbortSignal,
     exports,
     axios,
     FormData,

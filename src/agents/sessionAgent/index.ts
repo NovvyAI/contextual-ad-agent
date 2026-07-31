@@ -109,8 +109,8 @@ function createTools(ctx: AgentContext) {
 
   const run_sub_agent_bridge_video_revise_motion = tool({
     description:
-      "只调整桥接视频成片的运镜/节奏，草案图不会重新生成、画面内容不变，仅在该 cut 已经渲染出成片（status=done）" +
-      "且用户反馈明确是关于运镜/动态节奏问题时调用（比如「运镜太快了」「镜头晃得有点奇怪」「节奏拖沓」）。" +
+      "只调整桥接视频成片的运镜/节奏/时长，草案图不会重新生成、画面内容不变，仅在该 cut 已经渲染出成片（status=done）" +
+      "且用户反馈明确是关于运镜/动态节奏/时长问题时调用（比如「运镜太快了」「镜头晃得有点奇怪」「节奏拖沓」「太短了，再长一点」）。" +
       "如果反馈是关于画面内容本身（人物/场景/构图看起来不对），应该调用 run_sub_agent_bridge_video_revise 重新生成草案，不要用这个工具。" +
       "如果反馈本身模糊、看不出是哪一种，不要自己猜，直接用文字询问用户「是画面内容需要重新设计，还是只是运镜/节奏需要调整」。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),

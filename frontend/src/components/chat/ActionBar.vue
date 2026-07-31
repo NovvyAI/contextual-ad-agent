@@ -7,7 +7,7 @@ const props = defineProps<{
   ads: { id: number; name: string; summary: string }[];
   busy: boolean;
   onGeneratePlan: (adIds: number[]) => void;
-  onGenerateContent: (creativePlanId: number) => void;
+  onGenerateContent: (creativePlanId: number, imageModelKey: string) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
   onAssemblePlayable: (creativePlanId: number, selectedCandidateFrames: string[]) => void;
   onGenerateCustomGame: (bridgeCutId: number, description: string, selectedCandidateFrames: string[]) => void;
@@ -16,6 +16,13 @@ const props = defineProps<{
 }>();
 
 const selectedAdIds = ref<number[]>([]);
+// 和后端 src/agents/shared/imageModel.ts 里的 IMAGE_MODEL_OPTIONS 保持一致——
+// 选定之后这份方案下所有分镜草案/游戏素材生成（包括 revise）都用这个模型，不用每次调用各自决定
+const imageModelOptions = [
+  { key: "openai:gpt-image-2", label: "GPT Image 2" },
+  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2)" },
+];
+const selectedImageModelKey = ref(imageModelOptions[0].key);
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
 const customGameSelectedFrames = ref<string[]>([]);
@@ -23,6 +30,15 @@ const assembleDialogVisible = ref(false);
 const assembleSelectedFrames = ref<string[]>([]);
 
 const tileCandidateImages = computed(() => props.sessionState.episode.episodeAnalysis?.tileCandidateImages ?? []);
+// 和后端 playableAgent/index.ts 里的 VIDEO_DRAFT_CANDIDATE_KEY 保持一致——这个 key 不是 Episode 帧文件名，
+// 选中它时后端会去当前方案的 video cut 自己的产物里找草案图，不是查 episode 帧目录
+const VIDEO_DRAFT_CANDIDATE_KEY = "__video_draft__";
+const videoDraftCandidate = computed(() => {
+  const url = videoCuts.value[0]?.latestDraft?.imageUrl;
+  return url ? [{ filename: VIDEO_DRAFT_CANDIDATE_KEY, url }] : [];
+});
+// 候选素材统一成一个列表给两个弹窗共用——视频分镜草案图排在最前面，其余是 Episode 候选帧
+const allCandidateImages = computed(() => [...videoDraftCandidate.value, ...tileCandidateImages.value]);
 
 function submitCustomGame() {
   if (!gameCut.value?.id || !customGameDescription.value.trim()) return;
@@ -44,14 +60,17 @@ function submitAssemblePlayable() {
 }
 
 const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) => p.status === "approved"));
-const videoCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.type === "video"));
-const hasCuts = computed(() => props.sessionState.bridgeCuts.length > 0);
+// 一个 episode 理论上不该同时有多份 approved 方案，但实际数据里出现过（历史遗留/反复测试导致）——
+// 这里按当前这份 approved 方案过滤 cut，不然混进另一份方案已经 done 的 cut，会把这些按钮状态判断全部打乱
+const currentPlanCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.creativePlanId === approvedPlan.value?.id));
+const videoCuts = computed(() => currentPlanCuts.value.filter((c) => c.type === "video"));
+const hasCuts = computed(() => currentPlanCuts.value.length > 0);
 const videoDraftsReadyToConfirm = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "draft"));
-const gameCut = computed(() => props.sessionState.bridgeCuts.find((c) => c.type === "playableGame"));
+const gameCut = computed(() => currentPlanCuts.value.find((c) => c.type === "playableGame"));
 // M7 新增的手动确认点：video 段渲染完成、小游戏段还没组装过时，才显示「确认组装小游戏」按钮，不自动直通
 const readyToAssemblePlayable = computed(() => videoCuts.value.length > 0 && videoCuts.value.every((c) => c.status === "done") && gameCut.value?.status === "pending");
-const allCutsDone = computed(() => hasCuts.value && props.sessionState.bridgeCuts.every((c) => c.status === "done"));
-const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.status === "failed"));
+const allCutsDone = computed(() => hasCuts.value && currentPlanCuts.value.every((c) => c.status === "done"));
+const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status === "failed"));
 </script>
 
 <template>
@@ -68,7 +87,12 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
     </template>
 
     <template v-else-if="sessionState.episode.workflowStage === 'content_review'">
-      <t-button v-if="approvedPlan && !hasCuts" theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id)">生成内容</t-button>
+      <template v-if="approvedPlan && !hasCuts">
+        <t-select v-model="selectedImageModelKey" style="width: 220px" :disabled="busy">
+          <t-option v-for="opt in imageModelOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
+        </t-select>
+        <t-button theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id, selectedImageModelKey)">生成内容</t-button>
+      </template>
       <template v-else-if="hasCuts && failedCuts.length">
         <span style="color: var(--td-error-color, #d54941)">{{ failedCuts.length }} 个内容生成失败</span>
         <t-button v-for="cut in failedCuts" :key="cut.id" theme="danger" variant="outline" :disabled="busy" @click="onRetryBridgeCut(cut.id)">
@@ -103,12 +127,12 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
       </p>
       <t-textarea v-model="customGameDescription" placeholder="比如：找不同玩法，给两张几乎一样的游戏截图，需要在30秒内点出5处不同，每找对一处有音效反馈，全部找完弹出通关庆祝……" :autosize="{ minRows: 5, maxRows: 14 }" />
 
-      <div v-if="tileCandidateImages.length" style="margin-top: 12px">
+      <div v-if="allCandidateImages.length" style="margin-top: 12px">
         <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
-          可选：勾选下面这集里的画面作为素材参考（会作为参考图，不是直接拿来用，风格会重新绘制）
+          可选：勾选下面这些画面作为素材参考（含视频分镜草案图和这集的候选画面，会作为参考图，不是直接拿来用，风格会重新绘制）
         </p>
         <t-checkbox-group v-model="customGameSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
-          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+          <t-checkbox v-for="img in allCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
             <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
           </t-checkbox>
         </t-checkbox-group>
@@ -117,12 +141,12 @@ const failedCuts = computed(() => props.sessionState.bridgeCuts.filter((c) => c.
 
     <t-dialog v-model:visible="assembleDialogVisible" header="确认组装小游戏" width="600px" :on-confirm="submitAssemblePlayable" confirm-btn="开始组装">
       <p style="margin: 0 0 8px; color: var(--td-text-color-secondary, #666); font-size: 13px">确认后开始生成默认的翻牌配对小游戏。</p>
-      <div v-if="tileCandidateImages.length">
+      <div v-if="allCandidateImages.length">
         <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
-          可选：勾选下面这集里的画面作为卡面素材参考（不选也可以正常生成）
+          可选：勾选下面这些画面作为卡面素材参考（含视频分镜草案图和这集的候选画面，不选也可以正常生成）
         </p>
         <t-checkbox-group v-model="assembleSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
-          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+          <t-checkbox v-for="img in allCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
             <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
           </t-checkbox>
         </t-checkbox-group>

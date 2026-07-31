@@ -145,6 +145,9 @@ export default async (knex: Knex): Promise<void> => {
   });
   // M7：三选一桥接形式改成固定"过渡视频→H5 小游戏"两段式管线，DirectorAgent 不再需要 formatSequence 这一列
   await dropColumn("ab_creativePlan", "formatSequence");
+  // gpt-image-2 中转不稳定，用户可以在内容生成前选一次图片生成模型，选定后这份方案下所有分镜草案/
+  // 游戏素材生成（包括后续 revise）都用同一个模型，不用每次调用各自决定；不选就是 null，走系统默认
+  await addColumn("ab_creativePlan", "imageModelKey", "text");
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，
   // 读取源码跑一遍沙箱拿到 vendor.id/inputValues，写入一行禁用状态的配置。

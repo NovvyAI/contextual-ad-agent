@@ -6,6 +6,7 @@ data/web/
 data/vendor/vendor.json
 data/ad/
 data/episode/
+data/bridgeCut/
 data/uploads/
 data/test-assets/tmp/
 src/router.ts
