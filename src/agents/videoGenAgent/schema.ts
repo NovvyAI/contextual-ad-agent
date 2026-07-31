@@ -12,6 +12,14 @@ export const stageADraftSchema = z.object({
   lightingMood: z.string().describe("光影氛围"),
   emotionalTone: z.string().describe("情绪基调，应承接 Episode 结尾观众的情绪状态"),
   framingNotes: z.string().describe("构图/机位的简短补充说明，供 Stage B 渲染成片时保持连贯参考，不直接喂给模型"),
+  durationS: z
+    .number()
+    .min(6)
+    .max(15)
+    .describe(
+      "这段成片的时长（秒），在 6-15 秒范围内自由决定：画面信息量大、运镜复杂或情绪过渡需要更多铺垫时选长一些，" +
+        "画面简单直接、几乎是瞬间切换时选短一些，不要不假思索地固定选某一个值",
+    ),
 });
 
 export const bridgeVideoEvaluationSchema = z.object({

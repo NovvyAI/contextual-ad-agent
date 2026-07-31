@@ -48,6 +48,8 @@ function formatDraftSummary(draft: StageADraft): string {
     `光影氛围：${draft.lightingMood}`,
     `情绪基调：${draft.emotionalTone}`,
     `构图说明：${draft.framingNotes}`,
+    // 老数据（这个字段上线之前生成的 draft）没有 durationS，展示时兜底成之前固定用的 6 秒，避免显示 undefined
+    `时长：${draft.durationS ?? 6}秒`,
   ].join("\n");
 }
 
@@ -67,8 +69,8 @@ export function buildReviseMessages(
 
 /**
  * 只针对成片的运镜/节奏问题——草案图已确认，不重新生成，所以只允许模型重新考虑
- * cameraMovement/emotionalTone 这两个不影响画面构图的字段，其余字段照抄，避免 prompt 描述的内容和
- * 已经生成好的静态图对不上。
+ * cameraMovement/emotionalTone/durationS 这几个不影响画面构图的字段，其余字段照抄，避免 prompt 描述的内容和
+ * 已经生成好的静态图对不上。时长本质也是"节奏"的一部分（太快/太拖沓可以靠调整时长解决），所以也放在这里一起改。
  */
 export function buildMotionReviseMessages(
   episodeAnalysis: EpisodeAnalysis,
@@ -81,7 +83,7 @@ export function buildMotionReviseMessages(
   const text =
     `${formatContext(episodeAnalysis, ad, narrative, tone)}\n\n## 当前分镜草案（画面已确认，草案图不会重新生成）\n${formatDraftSummary(existing)}\n\n` +
     `## 用户对成片的反馈\n${feedback}\n\n` +
-    `这条反馈只针对成片的运镜/节奏，不涉及画面内容本身。请只重新给出 cameraMovement 和 emotionalTone 这两个字段的新值，` +
+    `这条反馈只针对成片的运镜/节奏/时长，不涉及画面内容本身。请只重新给出 cameraMovement、emotionalTone、durationS 这三个字段的新值，` +
     `其余字段（shotSize、subjectAction、lightingMood、framingNotes）原样返回当前草案的值，不要修改。`;
   return [{ role: "user", content: text }];
 }

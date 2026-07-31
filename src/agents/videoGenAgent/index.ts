@@ -11,7 +11,8 @@ import { recordRevise } from "@/agents/shared/reviseHistory";
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-2";
 const VIDEO_MODEL_KEY = "imarouter:seedance-2.0";
-const STAGE_B_DURATION_S = 6;
+// 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
+const DEFAULT_DURATION_S = 6;
 
 export interface DraftCutResult {
   bridgeCutId: number;
@@ -230,9 +231,10 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
   const episodeId = plan.episodeId;
 
+  const durationS = draft.durationS ?? DEFAULT_DURATION_S;
   const video = await u.Ai.Video(VIDEO_MODEL_KEY).run(
     {
-      duration: STAGE_B_DURATION_S,
+      duration: durationS,
       resolution: "1080p",
       aspectRatio: "9:16",
       prompt: assembleStageBPrompt(draft),
@@ -244,7 +246,9 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
   await video.save(relPath);
   const videoUrl = await u.oss.getFileUrl(relPath);
-  const durationMs = STAGE_B_DURATION_S * 1000;
+  // 供应商实际渲染的是 clampDuration 之后离 durationS 最近的允许档位（4/5/6/8/10/12/15秒），
+  // 这里没有拿到供应商侧最终 clamp 后的准确值，用请求时的 durationS 近似记录，和之前固定 6 秒时的做法一致
+  const durationMs = durationS * 1000;
 
   const evaluation = await evaluateRender(draft, durationMs);
 
@@ -306,7 +310,7 @@ export async function reviseStageBMotion(bridgeCutId: number, feedback: string):
       },
       { taskClass: "videoGen-stageB-motionRevise", describe: `Cut ${bridgeCutId} 运镜/节奏调整`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
-    const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone };
+    const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone, durationS: draft.durationS };
     await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(constrainedDraft) });
     const result = await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
     await recordRevise("bridgeCutMotion", bridgeCutId, feedback, existing, constrainedDraft);
