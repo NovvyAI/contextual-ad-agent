@@ -29,35 +29,56 @@ function inject(templateHtml: string, obj: unknown): string {
  * 用户可以不选（返回空数组），选中的帧不直接复制使用，只作为 u.Ai.Image referenceList 的参考图，
  * 保证生成的素材风格匹配游戏、同时保留真实角色/场景样貌。
  */
-function resolveCandidateReferenceImages(episodeId: number, selectedCandidateFrames: string[]): Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[] {
-  return selectedCandidateFrames
-    .map((filename) => u.getPath(["episode", String(episodeId), "frames", filename]))
-    .filter((p) => fs.existsSync(p))
-    .map((p) => ({ type: "image" as const, base64: fs.readFileSync(p).toString("base64") }));
+// 候选素材列表里代表"这个方案下 video cut 已经生成好的分镜草案图"的特殊 key，和 Episode 帧文件名区分开——
+// 草案图不是存在 episode 帧目录下的文件，选中这个 key 时要去 video cut 自己的产物里找，不是查文件名
+export const VIDEO_DRAFT_CANDIDATE_KEY = "__video_draft__";
+
+/** 压一下体积再当参考图用——原图是 gpt-image-2 直出的无损 PNG（1024x1536），未压缩前大概 2-3MB base64，
+ * 参考图只需要传达画风/构图，不需要这么大，压成 JPEG 控制在 300KB 以内能明显降低撞上供应商网关超时的概率 */
+async function compressForReference(rawBase64: string, mimeType: string): Promise<string> {
+  const compressedDataUri = await zipImage(`data:${mimeType};base64,${rawBase64}`, 300 * 1024);
+  return compressedDataUri.split(",")[1];
+}
+
+async function resolveCandidateReferenceImages(
+  episodeId: number,
+  creativePlanId: number,
+  selectedCandidateFrames: string[],
+): Promise<Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[]> {
+  const images: Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[] = [];
+  for (const key of selectedCandidateFrames) {
+    if (key === VIDEO_DRAFT_CANDIDATE_KEY) {
+      const videoCut = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "video").first();
+      const draftSegment = videoCut
+        ? await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "draftImage").where("isSelected", 1).first()
+        : null;
+      if (draftSegment?.filePath) {
+        const rawBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+        images.push({ type: "image", base64: await compressForReference(rawBase64, "image/png") });
+      }
+      continue;
+    }
+    const localPath = u.getPath(["episode", String(episodeId), "frames", key]);
+    if (fs.existsSync(localPath)) {
+      images.push({ type: "image", base64: fs.readFileSync(localPath).toString("base64") });
+    }
+  }
+  return images;
 }
 
 const VIDEO_REFERENCE_FRAME_COUNT = 3;
 
 /**
- * 同方案下 video cut 已经生成好的画面——分镜草案图 + 成片抽帧（不止首帧，均匀抽 N 张）——
- * 作为自定义玩法生成素材的额外参考图，让游戏素材画风能延续视频里已经定下来的样子，不是各画各的。
- * video cut 不存在、还没生成草案、还没渲染成片都不算错，能拿到多少算多少，不阻塞主流程。
+ * 同方案下 video cut 成片抽帧（不止首帧，均匀抽 N 张）——作为自定义玩法生成素材的额外参考图，
+ * 让游戏素材画风能延续视频里已经定下来的样子，不是各画各的。分镜草案图不在这里自动带上，
+ * 那张图已经作为候选素材开放给用户自己勾选（VIDEO_DRAFT_CANDIDATE_KEY），避免重复带入同一张图。
+ * video cut 不存在、还没渲染成片都不算错，能拿到多少算多少，不阻塞主流程。
  */
 async function resolveVideoCutReferenceImages(creativePlanId: number): Promise<Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[]> {
   const videoCut = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "video").first();
   if (!videoCut) return [];
 
   const images: Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[] = [];
-
-  const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "draftImage").where("isSelected", 1).first();
-  if (draftSegment?.filePath) {
-    // Stage A 草案图是 gpt-image-2 直出的无损 PNG（1024x1536，未压缩前大概 2-3MB base64），
-    // 当参考图只需要传达画风/构图，不需要这么大——压成 JPEG 控制在 300KB 以内，减轻请求体积，
-    // 降低这类多参考图请求撞上供应商 120 秒网关超时的概率
-    const rawBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
-    const compressedDataUri = await zipImage(`data:image/png;base64,${rawBase64}`, 300 * 1024);
-    images.push({ type: "image", base64: compressedDataUri.split(",")[1] });
-  }
 
   const renderSegment = await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "finalRender").where("isSelected", 1).first();
   if (renderSegment?.filePath) {
@@ -196,7 +217,7 @@ async function assemblePlayableInner(bridgeCutId: number, selectedCandidateFrame
       { taskClass: "playable-generateText", describe: `Cut ${bridgeCutId} 小游戏配置`, relatedObjects: String(bridgeCutId), projectId: episodeId },
     );
     const evaluation = await evaluatePlayable(config);
-    const referenceImages = resolveCandidateReferenceImages(episodeId, selectedCandidateFrames);
+    const referenceImages = await resolveCandidateReferenceImages(episodeId, cut.creativePlanId, selectedCandidateFrames);
     const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, adId, ad.tileCandidates ?? [], config, evaluation, referenceImages);
     return { bridgeCutId, config, previewUrl, evaluation };
   } catch (e) {
@@ -361,7 +382,10 @@ export async function generateCustomGame(bridgeCutId: number, description: strin
       };
     }
 
-    const referenceImages = [...resolveCandidateReferenceImages(episodeId, selectedCandidateFrames), ...(await resolveVideoCutReferenceImages(creativePlanId))];
+    const referenceImages = [
+      ...(await resolveCandidateReferenceImages(episodeId, creativePlanId, selectedCandidateFrames)),
+      ...(await resolveVideoCutReferenceImages(creativePlanId)),
+    ];
     const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
     const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
 

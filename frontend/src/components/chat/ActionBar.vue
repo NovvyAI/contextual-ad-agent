@@ -23,6 +23,15 @@ const assembleDialogVisible = ref(false);
 const assembleSelectedFrames = ref<string[]>([]);
 
 const tileCandidateImages = computed(() => props.sessionState.episode.episodeAnalysis?.tileCandidateImages ?? []);
+// 和后端 playableAgent/index.ts 里的 VIDEO_DRAFT_CANDIDATE_KEY 保持一致——这个 key 不是 Episode 帧文件名，
+// 选中它时后端会去当前方案的 video cut 自己的产物里找草案图，不是查 episode 帧目录
+const VIDEO_DRAFT_CANDIDATE_KEY = "__video_draft__";
+const videoDraftCandidate = computed(() => {
+  const url = videoCuts.value[0]?.latestDraft?.imageUrl;
+  return url ? [{ filename: VIDEO_DRAFT_CANDIDATE_KEY, url }] : [];
+});
+// 候选素材统一成一个列表给两个弹窗共用——视频分镜草案图排在最前面，其余是 Episode 候选帧
+const allCandidateImages = computed(() => [...videoDraftCandidate.value, ...tileCandidateImages.value]);
 
 function submitCustomGame() {
   if (!gameCut.value?.id || !customGameDescription.value.trim()) return;
@@ -106,12 +115,12 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
       </p>
       <t-textarea v-model="customGameDescription" placeholder="比如：找不同玩法，给两张几乎一样的游戏截图，需要在30秒内点出5处不同，每找对一处有音效反馈，全部找完弹出通关庆祝……" :autosize="{ minRows: 5, maxRows: 14 }" />
 
-      <div v-if="tileCandidateImages.length" style="margin-top: 12px">
+      <div v-if="allCandidateImages.length" style="margin-top: 12px">
         <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
-          可选：勾选下面这集里的画面作为素材参考（会作为参考图，不是直接拿来用，风格会重新绘制）
+          可选：勾选下面这些画面作为素材参考（含视频分镜草案图和这集的候选画面，会作为参考图，不是直接拿来用，风格会重新绘制）
         </p>
         <t-checkbox-group v-model="customGameSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
-          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+          <t-checkbox v-for="img in allCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
             <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
           </t-checkbox>
         </t-checkbox-group>
@@ -120,12 +129,12 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
 
     <t-dialog v-model:visible="assembleDialogVisible" header="确认组装小游戏" width="600px" :on-confirm="submitAssemblePlayable" confirm-btn="开始组装">
       <p style="margin: 0 0 8px; color: var(--td-text-color-secondary, #666); font-size: 13px">确认后开始生成默认的翻牌配对小游戏。</p>
-      <div v-if="tileCandidateImages.length">
+      <div v-if="allCandidateImages.length">
         <p style="margin: 0 0 6px; color: var(--td-text-color-secondary, #666); font-size: 13px">
-          可选：勾选下面这集里的画面作为卡面素材参考（不选也可以正常生成）
+          可选：勾选下面这些画面作为卡面素材参考（含视频分镜草案图和这集的候选画面，不选也可以正常生成）
         </p>
         <t-checkbox-group v-model="assembleSelectedFrames" style="display: flex; gap: 8px; flex-wrap: wrap">
-          <t-checkbox v-for="img in tileCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
+          <t-checkbox v-for="img in allCandidateImages" :key="img.filename" :value="img.filename" style="margin: 0">
             <img :src="img.url" style="width: 64px; height: 64px; object-fit: cover; border-radius: 4px; vertical-align: middle" />
           </t-checkbox>
         </t-checkbox-group>
