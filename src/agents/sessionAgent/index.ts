@@ -39,25 +39,45 @@ const creativePlanIdInputSchema = z.object({
   creativePlanId: z.number().describe("要操作的创意方案 id"),
 });
 
+/**
+ * revise 类工具的失败统一在这里兜底——这几个工具的 execute() 直接调用耗时的生成/revise 函数，
+ * 原来没有任何 try/catch：一旦背后的模型调用抛错（最常见的是供应商侧临时超时/不可用），
+ * 这个异常会在 AI SDK 的工具执行链路里被吞掉，聊天框里不会有任何反馈——用户体感就是"发了消息但完全没反应"，
+ * 而不是一条看得懂的失败提示。这里统一兜底：先给用户推一张明确的错误卡片（不依赖模型后续会不会再开口说话），
+ * 再把失败原因如实当工具结果返回给模型，模型如果还有后续步骤可以据此再用文字跟用户解释。
+ */
+async function safeRevise(ctx: AgentContext, label: string, fn: () => Promise<string>): Promise<string> {
+  try {
+    return await fn();
+  } catch (e) {
+    const message = u.error(e).message;
+    console.error(`[sessionAgent] ${label}失败:`, message);
+    const errMsg = ctx.resTool.newMessage("assistant");
+    errMsg.error(`${label}失败：${message}`);
+    return `${label}失败：${message}。已经把失败原因推送给用户看到了，不需要再用文字重复解释一遍。`;
+  }
+}
+
 function createTools(ctx: AgentContext) {
   const run_sub_agent_director_plan_revise = tool({
     description: "根据用户的自由文字反馈修改某一份已存在的创意方案，仅在用户明确针对某个具体方案提出修改意见时调用",
     inputSchema: jsonSchema<{ planId: number; feedback: string }>(reviseInputSchema.toJSONSchema()),
-    execute: async ({ planId, feedback }) => {
-      const updated = await revisePlan(planId, feedback);
-      const planMsg = ctx.resTool.newMessage("assistant", "创意总监");
-      planMsg.planCandidate({
-        id: updated.id,
-        adId: updated.adId,
-        narrative: updated.narrative,
-        tone: updated.tone,
-        planEvaluatorScore: updated.planEvaluatorScore,
-        status: updated.status,
-        evaluatorFeedback: updated.evaluatorFeedback,
-      });
-      planMsg.complete();
-      return `已根据反馈修改方案 ${planId}，评分 ${updated.planEvaluatorScore}，评审意见：${updated.evaluatorFeedback.feedback}。新的方案已推送给用户查看。`;
-    },
+    execute: async ({ planId, feedback }) =>
+      safeRevise(ctx, "方案调整", async () => {
+        const updated = await revisePlan(planId, feedback);
+        const planMsg = ctx.resTool.newMessage("assistant", "创意总监");
+        planMsg.planCandidate({
+          id: updated.id,
+          adId: updated.adId,
+          narrative: updated.narrative,
+          tone: updated.tone,
+          planEvaluatorScore: updated.planEvaluatorScore,
+          status: updated.status,
+          evaluatorFeedback: updated.evaluatorFeedback,
+        });
+        planMsg.complete();
+        return `已根据反馈修改方案 ${planId}，评分 ${updated.planEvaluatorScore}，评审意见：${updated.evaluatorFeedback.feedback}。新的方案已推送给用户查看。`;
+      }),
   });
 
   const run_sub_agent_bridge_video_revise = tool({
@@ -68,22 +88,23 @@ function createTools(ctx: AgentContext) {
       "应该改用 run_sub_agent_bridge_video_revise_motion，不要用这个工具，因为这个工具会让用户重新走一遍确认分镜、渲染成片的流程。" +
       "如果反馈本身模糊、看不出是画面内容问题还是运镜/节奏问题，不要自己猜，直接用文字询问用户「是画面内容需要重新设计，还是只是运镜/节奏需要调整」。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
-    execute: async ({ bridgeCutId, feedback }) => {
-      const updated = await reviseDraftCut(bridgeCutId, feedback);
-      const cutRow = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-      const cutMsg = ctx.resTool.newMessage("assistant", "桥接视频");
-      cutMsg.storyboardCut({
-        bridgeCutId: updated.bridgeCutId,
-        index: cutRow?.index ?? 0,
-        imageUrl: updated.imageUrl,
-        prompt: updated.assembledPrompt,
-        status: "draft",
-        evaluatorScore: updated.evaluation.overallScore,
-        evaluatorFeedback: updated.evaluation.feedback,
-      });
-      cutMsg.complete();
-      return `已重新生成分镜草案 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的草案图已推送给用户查看，需要用户重新确认分镜、渲染成片。`;
-    },
+    execute: async ({ bridgeCutId, feedback }) =>
+      safeRevise(ctx, "分镜草案重新生成", async () => {
+        const updated = await reviseDraftCut(bridgeCutId, feedback);
+        const cutRow = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+        const cutMsg = ctx.resTool.newMessage("assistant", "桥接视频");
+        cutMsg.storyboardCut({
+          bridgeCutId: updated.bridgeCutId,
+          index: cutRow?.index ?? 0,
+          imageUrl: updated.imageUrl,
+          prompt: updated.assembledPrompt,
+          status: "draft",
+          evaluatorScore: updated.evaluation.overallScore,
+          evaluatorFeedback: updated.evaluation.feedback,
+        });
+        cutMsg.complete();
+        return `已重新生成分镜草案 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的草案图已推送给用户查看，需要用户重新确认分镜、渲染成片。`;
+      }),
   });
 
   const run_sub_agent_bridge_video_revise_motion = tool({
@@ -93,19 +114,20 @@ function createTools(ctx: AgentContext) {
       "如果反馈是关于画面内容本身（人物/场景/构图看起来不对），应该调用 run_sub_agent_bridge_video_revise 重新生成草案，不要用这个工具。" +
       "如果反馈本身模糊、看不出是哪一种，不要自己猜，直接用文字询问用户「是画面内容需要重新设计，还是只是运镜/节奏需要调整」。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
-    execute: async ({ bridgeCutId, feedback }) => {
-      const updated = await reviseStageBMotion(bridgeCutId, feedback);
-      const msg = ctx.resTool.newMessage("assistant", "桥接视频");
-      msg.videoCandidate({
-        bridgeCutId: updated.bridgeCutId,
-        videoUrl: updated.videoUrl,
-        durationMs: updated.durationMs,
-        evaluatorScore: updated.evaluation.overallScore,
-        evaluatorFeedback: updated.evaluation.feedback,
-      });
-      msg.complete();
-      return `已调整成片 ${bridgeCutId} 的运镜/节奏并重新渲染，草案图和画面内容未改变，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的成片已推送给用户查看。`;
-    },
+    execute: async ({ bridgeCutId, feedback }) =>
+      safeRevise(ctx, "运镜/节奏调整", async () => {
+        const updated = await reviseStageBMotion(bridgeCutId, feedback);
+        const msg = ctx.resTool.newMessage("assistant", "桥接视频");
+        msg.videoCandidate({
+          bridgeCutId: updated.bridgeCutId,
+          videoUrl: updated.videoUrl,
+          durationMs: updated.durationMs,
+          evaluatorScore: updated.evaluation.overallScore,
+          evaluatorFeedback: updated.evaluation.feedback,
+        });
+        msg.complete();
+        return `已调整成片 ${bridgeCutId} 的运镜/节奏并重新渲染，草案图和画面内容未改变，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的成片已推送给用户查看。`;
+      }),
   });
 
   const run_sub_agent_playable_revise = tool({
@@ -114,19 +136,20 @@ function createTools(ctx: AgentContext) {
       "如果这个 cut 是走「自定义玩法生成」产出的自定义游戏，应该改用 run_sub_agent_custom_game_revise，不要用这个工具。" +
       "如果不确定这个 cut 是哪种，直接调用即可——函数自己会校验，不是自定义游戏的话不会报错。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
-    execute: async ({ bridgeCutId, feedback }) => {
-      const updated = await revisePlayable(bridgeCutId, feedback);
-      const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
-      gameMsg.contentCandidate({
-        bridgeCutId: updated.bridgeCutId,
-        type: "playableGame",
-        previewUrl: updated.previewUrl,
-        evaluatorScore: updated.evaluation.overallScore,
-        evaluatorFeedback: updated.evaluation.feedback,
-      });
-      gameMsg.complete();
-      return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的预览已推送给用户查看。`;
-    },
+    execute: async ({ bridgeCutId, feedback }) =>
+      safeRevise(ctx, "互动游戏重新生成", async () => {
+        const updated = await revisePlayable(bridgeCutId, feedback);
+        const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
+        gameMsg.contentCandidate({
+          bridgeCutId: updated.bridgeCutId,
+          type: "playableGame",
+          previewUrl: updated.previewUrl,
+          evaluatorScore: updated.evaluation.overallScore,
+          evaluatorFeedback: updated.evaluation.feedback,
+        });
+        gameMsg.complete();
+        return `已根据反馈重新生成互动游戏内容 ${bridgeCutId}，评分 ${updated.evaluation.overallScore}，评审意见：${updated.evaluation.feedback}。新的预览已推送给用户查看。`;
+      }),
   });
 
   const run_sub_agent_custom_game_revise = tool({
@@ -136,23 +159,26 @@ function createTools(ctx: AgentContext) {
       "如果这个 cut 是默认的翻牌配对，应该改用 run_sub_agent_playable_revise，不要用这个工具。" +
       "这次调整如果失败（比如自动化验证没通过），原来能玩的游戏会保持不变，不会被替换成默认版本。",
     inputSchema: jsonSchema<{ bridgeCutId: number; feedback: string }>(reviseCutInputSchema.toJSONSchema()),
-    execute: async ({ bridgeCutId, feedback }) => {
-      const result = await reviseCustomGame(bridgeCutId, feedback);
-      if (!result.success) {
-        return `自定义游戏调整未成功：${result.reviseFailedReason}`;
-      }
-      const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
-      gameMsg.contentCandidate({
-        bridgeCutId: result.bridgeCutId,
-        type: "playableGame",
-        previewUrl: result.previewUrl!,
-        evaluatorScore: result.evaluatorScore!,
-        evaluatorFeedback: result.evaluatorFeedback,
-        custom: true,
-      });
-      gameMsg.complete();
-      return `已根据反馈调整自定义游戏 ${bridgeCutId}。新的预览已推送给用户查看。`;
-    },
+    execute: async ({ bridgeCutId, feedback }) =>
+      safeRevise(ctx, "自定义游戏调整", async () => {
+        const result = await reviseCustomGame(bridgeCutId, feedback);
+        if (!result.success) {
+          const errMsg = ctx.resTool.newMessage("assistant");
+          errMsg.error(`自定义游戏调整未成功：${result.reviseFailedReason}`);
+          return `自定义游戏调整未成功：${result.reviseFailedReason}。已经把失败原因推送给用户看到了，不需要再用文字重复解释一遍。`;
+        }
+        const gameMsg = ctx.resTool.newMessage("assistant", "互动游戏");
+        gameMsg.contentCandidate({
+          bridgeCutId: result.bridgeCutId,
+          type: "playableGame",
+          previewUrl: result.previewUrl!,
+          evaluatorScore: result.evaluatorScore!,
+          evaluatorFeedback: result.evaluatorFeedback,
+          custom: true,
+        });
+        gameMsg.complete();
+        return `已根据反馈调整自定义游戏 ${bridgeCutId}。新的预览已推送给用户查看。`;
+      }),
   });
 
   const run_confirm_plan = tool({

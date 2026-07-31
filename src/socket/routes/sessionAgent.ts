@@ -151,7 +151,12 @@ export default (nsp: Namespace) => {
         await agent.runDecisionAI(ctx);
       } catch (err: any) {
         if (err?.name !== "AbortError" && !currentController.signal.aborted) {
-          console.error("[sessionAgent] chat error:", u.error(err).message);
+          const message = u.error(err).message;
+          console.error("[sessionAgent] chat error:", message);
+          // runDecisionAI 自己的 catch 已经会在 fullStream 报错时调用 msg.error()，这里是兜底：
+          // 万一还有别的异常路径逃过了那层处理（比如 stream() 建立阶段本身就失败），
+          // 不能让用户发的消息看起来"完全没反应"，至少要有一条能看到的错误提示
+          msg.error(message);
         }
       } finally {
         if (abortController === currentController) abortController = null;

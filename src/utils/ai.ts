@@ -301,7 +301,9 @@ function referenceList2imageBase642(id: string, input: any) {
   return input;
 }
 
-export type ReferenceList = { type: "image"; base64: string } | { type: "audio"; base64: string } | { type: "video"; base64: string };
+// image 类型的 url 是可选的公网可访问地址（比如 OSS 已经落盘的产物）——有些供应商（如 ImaRouter/Seedance）
+// 的素材合规审核流程要求传一个可公网抓取的真实 url，不接受 base64 临时直链，供应商脚本按需选用
+export type ReferenceList = { type: "image"; base64: string; url?: string } | { type: "audio"; base64: string } | { type: "video"; base64: string };
 
 interface ImageConfig {
   prompt: string;

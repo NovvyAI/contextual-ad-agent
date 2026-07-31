@@ -6,10 +6,14 @@
  * 1) 只接视频生成，和 ads-gen-agent-main 的 tools/seedance.py 走的是同一个平台/同一套接口契约
  * 2) 提交任务 POST {baseUrl}/v1/videos，轮询 GET {baseUrl}/v1/videos/{id}
  * 3) 时长只接受 4/5/6/8/10/12/15 秒（ImaRouter Seedance 的硬性限制）
- * 4) 参考图/参考视频：ads-gen-agent-main 那边是先传 GCS 拿一个可访问的 URL 再传给 ImaRouter；
- *    我们这套供应商系统里参考素材是 base64，没有等价的"先传对象存储拿URL"能力，这里先按
- *    data URI 直接传（大多数兼容 OpenAI 风格的多模态接口能接受），未经过完整验证，纯文本
- *    生成（mode: text）这条路径是明确验证过、优先保证能用的。
+ * 4) 参考图/参考视频：优先走 ImaRouter 的素材审核流程（POST /v1/assets/group/create 建分组 →
+ *    POST /v1/assets/create 传公网可访问的 url 建素材 → POST /v1/assets/get 轮询审核状态 →
+ *    /v1/videos 里用 asset://<assetId> 引用），这是文档推荐的正式接入方式，也是唯一能避免
+ *    "疑似真实人物" 隐私合规拦截的路径——真实测试过：同一张人像图，直接塞 base64 临时直链会被
+ *    Seedance/Doubao 判定为疑似真实人物而拒绝，走这条素材审核流程能正常通过并渲染成功。
+ *    只有 referenceList 里的图片没带公网 url（比如本机 dev 环境用的是 localhost，ImaRouter
+ *    的服务器访问不到）时，才退回 base64 data URI 直传，这条路径本机开发环境验证过能跑通，
+ *    但会带着"疑似真实人物"这类隐私合规拦截的风险，生产环境配了公网 ossURL 之后就不会再走这条。
  */
 // ============================================================
 // 类型定义
@@ -61,7 +65,7 @@ interface VendorConfig {
   models: (TextModel | ImageModel | VideoModel | TTSModel)[];
 }
 type ReferenceList =
-  | { type: "image"; sourceType: "base64"; base64: string }
+  | { type: "image"; sourceType: "base64"; base64: string; url?: string }
   | { type: "audio"; sourceType: "base64"; base64: string }
   | { type: "video"; sourceType: "base64"; base64: string };
 interface ImageConfig {
@@ -157,6 +161,55 @@ const clampDuration = (duration: number): number => {
   return ALLOWED_DURATIONS.reduce((best, d) => (Math.abs(d - duration) < Math.abs(best - duration) ? d : best));
 };
 
+const isPublicUrl = (url: string): boolean => /^https?:\/\//i.test(url) && !/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(url);
+
+// 素材分组——真实调用确认过 group_id 是必填项，没有枚举/查询已有分组的接口，每次请求建一个新分组，
+// 接受这点小开销（几百毫秒的 HTTP 往返），换取不用操心 VM 沙箱执行之间能不能持久化缓存
+async function createAssetGroup(headers: Record<string, string>): Promise<string> {
+  const resp = await axios.post(
+    `${getBaseUrl()}/v1/assets/group/create`,
+    { name: "contextual-ad-agent", group_type: "AIGC", project_name: "default", model: "seedance-upload" },
+    { headers },
+  );
+  const groupId = resp.data?.data?.Id;
+  if (!resp.data?.success || !groupId) {
+    throw new Error(`创建素材分组失败：${resp.data?.message || JSON.stringify(resp.data).slice(0, 300)}`);
+  }
+  return groupId;
+}
+
+const ASSET_TERMINAL_OK = ["active", "approved", "success"];
+const ASSET_TERMINAL_FAIL = ["rejected", "failed", "error", "banned", "blocked"];
+
+/**
+ * 上传一张公网可访问的图片素材并等审核完成，返回 asset://<id> 引用——真实测试过这条流程，
+ * 素材状态字段是 Status，只观察到过 "Active"（审核通过，几乎立即），没实测到过拒绝态的具体字符串，
+ * 所以拒绝分支按常见命名保守匹配，真遇到没覆盖到的状态值就会超时报错，把原始状态带出来方便排查。
+ */
+async function uploadAssetAndGetReference(headers: Record<string, string>, url: string): Promise<string> {
+  const groupId = await createAssetGroup(headers);
+  const createResp = await axios.post(`${getBaseUrl()}/v1/assets/create`, { url, group_id: groupId }, { headers });
+  const assetId = createResp.data?.data?.Id;
+  if (!createResp.data?.success || !assetId) {
+    throw new Error(`素材上传失败：${createResp.data?.message || JSON.stringify(createResp.data).slice(0, 300)}`);
+  }
+
+  const pollResult = await pollTask(
+    async (): Promise<PollResult> => {
+      const getResp = await axios.post(`${getBaseUrl()}/v1/assets/get`, { id: assetId }, { headers });
+      const status = String(getResp.data?.data?.Status ?? "").toLowerCase();
+      if (ASSET_TERMINAL_OK.includes(status)) return { completed: true, data: assetId };
+      if (ASSET_TERMINAL_FAIL.includes(status)) return { completed: true, error: `素材未通过审核（状态：${status || "未知"}）` };
+      return { completed: false };
+    },
+    2000,
+    60000,
+  );
+  if (pollResult.error) throw new Error(pollResult.error);
+  if (!pollResult.data) throw new Error("素材审核轮询超时，未拿到结果");
+  return `asset://${pollResult.data}`;
+}
+
 const extractVideoUrl = (result: any): string | null => {
   const candidates: (string | undefined)[] = [];
   if (Array.isArray(result?.results)) {
@@ -189,7 +242,15 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   const headers = getHeaders();
   const duration = clampDuration(config.duration);
 
-  const imageRefs = (config.referenceList || []).filter((r) => r.type === "image").map((r) => `data:image/png;base64,${r.base64}`);
+  const imageItems = (config.referenceList || []).filter((r): r is Extract<ReferenceList, { type: "image" }> => r.type === "image");
+  const imageRefs: string[] = [];
+  for (const item of imageItems) {
+    if (item.url && isPublicUrl(item.url)) {
+      imageRefs.push(await uploadAssetAndGetReference(headers, item.url));
+    } else {
+      imageRefs.push(`data:image/png;base64,${item.base64}`);
+    }
+  }
   const videoRefs = (config.referenceList || []).filter((r) => r.type === "video").map((r) => `data:video/mp4;base64,${r.base64}`);
   const audioRefs = (config.referenceList || []).filter((r) => r.type === "audio").map((r) => `data:audio/mp3;base64,${r.base64}`);
 
