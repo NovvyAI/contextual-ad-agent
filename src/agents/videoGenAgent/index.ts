@@ -9,7 +9,7 @@ import { evaluateDraft, evaluateRender } from "./evaluator";
 import { recordRevise } from "@/agents/shared/reviseHistory";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
-const IMAGE_MODEL_KEY = "openai:gpt-image-1";
+const IMAGE_MODEL_KEY = "openai:gpt-image-2";
 const VIDEO_MODEL_KEY = "imarouter:seedance-2.0";
 const STAGE_B_DURATION_S = 6;
 

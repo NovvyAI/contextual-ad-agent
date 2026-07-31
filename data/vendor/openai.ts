@@ -137,6 +137,7 @@ const vendor: VendorConfig = {
     { name: "GPT-5.2", modelName: "gpt-5.2", type: "text", think: false },
     { name: "GPT-5.4", modelName: "gpt-5.4", type: "text", think: false },
     { name: "GPT Image 1", modelName: "gpt-image-1", type: "image", mode: ["text", "singleImage", "multiReference"] },
+    { name: "GPT Image 2", modelName: "gpt-image-2", type: "image", mode: ["text", "singleImage", "multiReference"] },
   ],
 };
 // ============================================================
@@ -147,14 +148,14 @@ const getHeaders = () => {
   return { Authorization: `Bearer ${apiKey}` };
 };
 
-// aspectRatio（宽:高）映射到 gpt-image-1 支持的固定尺寸档位，没有正方形/竖屏/横屏之外的选项
+// aspectRatio（宽:高）映射到 gpt-image 系列支持的固定尺寸档位，没有正方形/竖屏/横屏之外的选项
 function mapSize(aspectRatio: `${number}:${number}`): "1024x1024" | "1024x1536" | "1536x1024" {
   const [w, h] = aspectRatio.split(":").map(Number);
   if (w === h) return "1024x1024";
   return w > h ? "1536x1024" : "1024x1536";
 }
 
-// gpt-image-1 没有"分辨率"档位，用 quality 近似映射 1K/2K/4K 的"越高越贵越细"语义
+// gpt-image 系列没有"分辨率"档位，用 quality 近似映射 1K/2K/4K 的"越高越贵越细"语义
 function mapQuality(size: "1K" | "2K" | "4K"): "low" | "medium" | "high" {
   return size === "1K" ? "low" : size === "2K" ? "medium" : "high";
 }

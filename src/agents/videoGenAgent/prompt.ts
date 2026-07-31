@@ -5,7 +5,7 @@ import type { StageADraft } from "./schema";
 
 // 参考 Toonflow-app 的景别/运镜标签映射（data/modelPrompt/video/universalMulti-parameterMode.md），
 // 附在中文描述后面给图片/视频生成模型一个标准化的英文镜头术语锚点，不是整段翻译成英文
-// （这个项目已有的 Chinese prompt 在 gpt-image-1/Seedance 上跑得通，没必要改成全英文）。
+// （这个项目已有的 Chinese prompt 在 gpt-image-2/Seedance 上跑得通，没必要改成全英文）。
 const SHOT_SIZE_EN: Record<string, string> = {
   远景: "extreme wide shot",
   全景: "wide establishing shot",
@@ -87,7 +87,7 @@ export function buildMotionReviseMessages(
 }
 
 /**
- * Stage A（gpt-image-1 草案图）：最多两张参考图需要消歧——Episode 结尾画面 + 广告参考图，
+ * Stage A（gpt-image-2 草案图）：最多两张参考图需要消歧——Episode 结尾画面 + 广告参考图，
  * 参考 Toonflow-app universalMulti-parameterMode.md 的 @图N 编号引用法，按传入顺序编号，
  * 让模型明确知道每张参考图在画面里分别扮演什么角色，不再靠一句笼统描述让模型自己猜。
  */

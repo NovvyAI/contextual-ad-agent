@@ -11,7 +11,7 @@ import { buildGameSpecMessages, buildGameSpecReviseMessages, buildGameCodeMessag
 import { runGameSmokeTest } from "@/utils/gameSmokeTest";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
-const IMAGE_MODEL_KEY = "openai:gpt-image-1";
+const IMAGE_MODEL_KEY = "openai:gpt-image-2";
 const DEFAULT_PAIRS = 8; // 照搬 Python 参考实现 build_playable.py 的 DEFAULT_PAIRS
 
 const INJECT_RE = /\/\*INJECT\*\/\{\}\/\*END\*\//;
@@ -206,7 +206,7 @@ function extractHtml(text: string): string {
 }
 
 /**
- * 按 GameSpec 需要的素材数量，用 gpt-image-1 按每一条具体描述单独生成。
+ * 按 GameSpec 需要的素材数量，用 gpt-image-2 按每一条具体描述单独生成。
  * 不复用 tileCandidates（AdLibraryAgent 挑出的真实游戏截图）——那是完整的游戏界面截图，
  * 适合当翻牌配对里"随便一张有辨识度的图"，但套不进这里"单个独立图标/单张背景图"这类有具体要求的槽位，
  * 试过一次真的把截图硬塞进棋子槽位，画面里出现了缩得很小的完整界面截图，和其余棋子风格完全不搭。
