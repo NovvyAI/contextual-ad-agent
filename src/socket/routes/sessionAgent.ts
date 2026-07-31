@@ -78,8 +78,9 @@ export default (nsp: Namespace) => {
     });
 
     // bridgeCut:generate —— 按钮点击和聊天触发共用 actions.generateContentAction
-    socket.on("bridgeCut:generate", async (data: { creativePlanId: number }) => {
-      await actions.generateContentAction(resTool, episodeId, data.creativePlanId);
+    // imageModelKey：用户在生成前选的图片模型（可选），只有按钮走的这条路会带，聊天触发走系统默认
+    socket.on("bridgeCut:generate", async (data: { creativePlanId: number; imageModelKey?: string }) => {
+      await actions.generateContentAction(resTool, episodeId, data.creativePlanId, data.imageModelKey);
     });
 
     // bridgeCut:retry —— 只有按钮会触发（对已存在失败 cut 的操作，不在"聊天触发下一步"范围内）

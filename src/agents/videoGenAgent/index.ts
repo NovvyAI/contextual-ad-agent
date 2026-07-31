@@ -8,9 +8,9 @@ import { buildStageADraftMessages, buildReviseMessages, buildMotionReviseMessage
 import { evaluateDraft, evaluateRender } from "./evaluator";
 import { recordRevise } from "@/agents/shared/reviseHistory";
 import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
+import { resolveImageModelKey } from "@/agents/shared/imageModel";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
-const IMAGE_MODEL_KEY = "openai:gpt-image-2";
 const VIDEO_MODEL_KEY = "imarouter:seedance-2.0";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
 const DEFAULT_DURATION_S = 6;
@@ -117,7 +117,8 @@ async function renderDraftImage(
   const { refs, hasEpisodeFrame, hasAdFrame, hasGameAssetFrame } = await buildReferenceList(episodeId, adId, ad, creativePlanId);
   const assembledPrompt = assembleStageAPrompt(draft, hasEpisodeFrame, hasAdFrame, hasGameAssetFrame);
   const relPath = `bridgeCut/${bridgeCutId}/draft-${Date.now()}.png`;
-  const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+  const imageModelKey = await resolveImageModelKey(creativePlanId);
+  const image = await u.Ai.Image(imageModelKey).run(
     {
       prompt: assembledPrompt,
       referenceList: refs.length > 0 ? refs : undefined,
@@ -131,7 +132,7 @@ async function renderDraftImage(
   await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").update({ isSelected: 0 });
   await u.db("ab_generatedSegment").insert({
     bridgeCutId,
-    model: IMAGE_MODEL_KEY,
+    model: imageModelKey,
     filePath: relPath,
     state: "done",
     stage: "draftImage",

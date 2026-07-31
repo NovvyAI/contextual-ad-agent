@@ -12,9 +12,9 @@ import { runGameSmokeTest } from "@/utils/gameSmokeTest";
 import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
 import { sampleFrames } from "@/utils/video";
 import { zipImage } from "@/utils/vm";
+import { resolveImageModelKey } from "@/agents/shared/imageModel";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
-const IMAGE_MODEL_KEY = "openai:gpt-image-2";
 const DEFAULT_PAIRS = 8; // 照搬 Python 参考实现 build_playable.py 的 DEFAULT_PAIRS
 
 const INJECT_RE = /\/\*INJECT\*\/\{\}\/\*END\*\//;
@@ -177,11 +177,13 @@ async function assemble(
       tileUrls.push(await u.oss.getFileUrl(relPath));
     }
   }
+  let imageModelKey: `${string}:${string}` = "openai:gpt-image-2";
   if (tileUrls.length < 2) {
     tileUrls.length = 0;
+    imageModelKey = await resolveImageModelKey(creativePlanId);
     for (let i = 0; i < config.tilePrompts.length; i++) {
       const relPath = `${relDir}/game/assets/tiles/tile_src_${i}.png`;
-      const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+      const image = await u.Ai.Image(imageModelKey).run(
         { prompt: config.tilePrompts[i], size: "1K", aspectRatio: "1:1", referenceList: referenceImages.length > 0 ? referenceImages : undefined },
         { taskClass: "playable-tileImage", describe: `Cut ${bridgeCutId} 配对素材图 ${i}`, relatedObjects: String(bridgeCutId), projectId: episodeId },
       );
@@ -193,7 +195,7 @@ async function assemble(
 
   const gameHtml = inject(gameTemplate, { title: config.title, tiles: manifestTiles, sounds: {} });
 
-  return finalizePlayablePackage(bridgeCutId, creativePlanId, gameHtml, config.title, config.ctaUrl, JSON.stringify(config), IMAGE_MODEL_KEY);
+  return finalizePlayablePackage(bridgeCutId, creativePlanId, gameHtml, config.title, config.ctaUrl, JSON.stringify(config), imageModelKey);
 }
 
 /**
@@ -296,16 +298,18 @@ function extractHtml(text: string): string {
 async function acquireCustomGameAssets(
   bridgeCutId: number,
   episodeId: number,
+  creativePlanId: number,
   spec: GameSpec,
   referenceImages: Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[] = [],
 ): Promise<string[]> {
   const relDir = `bridgeCut/${bridgeCutId}/playable`;
   const assetUrls: string[] = [];
+  const imageModelKey = await resolveImageModelKey(creativePlanId);
 
   for (const need of spec.assetsNeeded) {
     for (let i = 0; i < need.count; i++) {
       const relPath = `${relDir}/game/assets/custom_${assetUrls.length}.png`;
-      const image = await u.Ai.Image(IMAGE_MODEL_KEY).run(
+      const image = await u.Ai.Image(imageModelKey).run(
         { prompt: need.description, size: "1K", aspectRatio: "1:1", referenceList: referenceImages.length > 0 ? referenceImages : undefined },
         { taskClass: "playable-customGameAsset", describe: `Cut ${bridgeCutId} 自定义素材 ${assetUrls.length}`, relatedObjects: String(bridgeCutId), projectId: episodeId },
       );
@@ -386,7 +390,7 @@ export async function generateCustomGame(bridgeCutId: number, description: strin
       ...(await resolveCandidateReferenceImages(episodeId, creativePlanId, selectedCandidateFrames)),
       ...(await resolveVideoCutReferenceImages(creativePlanId)),
     ];
-    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
+    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, creativePlanId, spec, referenceImages);
     const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
 
     if (codegenResult.ok) {
@@ -468,7 +472,7 @@ export async function reviseCustomGame(bridgeCutId: number, feedback: string): P
     }
 
     const referenceImages = await resolveVideoCutReferenceImages(cut.creativePlanId);
-    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
+    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, cut.creativePlanId, spec, referenceImages);
     const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
     if (!codegenResult.ok) {
       return { bridgeCutId, success: false, reviseFailedReason: `调整后的游戏未通过冒烟测试：${codegenResult.lastError}，原来的游戏保持不变`, spec };

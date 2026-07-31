@@ -7,7 +7,7 @@ const props = defineProps<{
   ads: { id: number; name: string; summary: string }[];
   busy: boolean;
   onGeneratePlan: (adIds: number[]) => void;
-  onGenerateContent: (creativePlanId: number) => void;
+  onGenerateContent: (creativePlanId: number, imageModelKey: string) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
   onAssemblePlayable: (creativePlanId: number, selectedCandidateFrames: string[]) => void;
   onGenerateCustomGame: (bridgeCutId: number, description: string, selectedCandidateFrames: string[]) => void;
@@ -16,6 +16,13 @@ const props = defineProps<{
 }>();
 
 const selectedAdIds = ref<number[]>([]);
+// 和后端 src/agents/shared/imageModel.ts 里的 IMAGE_MODEL_OPTIONS 保持一致——
+// 选定之后这份方案下所有分镜草案/游戏素材生成（包括 revise）都用这个模型，不用每次调用各自决定
+const imageModelOptions = [
+  { key: "openai:gpt-image-2", label: "GPT Image 2" },
+  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2)" },
+];
+const selectedImageModelKey = ref(imageModelOptions[0].key);
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
 const customGameSelectedFrames = ref<string[]>([]);
@@ -80,7 +87,12 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
     </template>
 
     <template v-else-if="sessionState.episode.workflowStage === 'content_review'">
-      <t-button v-if="approvedPlan && !hasCuts" theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id)">生成内容</t-button>
+      <template v-if="approvedPlan && !hasCuts">
+        <t-select v-model="selectedImageModelKey" style="width: 220px" :disabled="busy">
+          <t-option v-for="opt in imageModelOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
+        </t-select>
+        <t-button theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id, selectedImageModelKey)">生成内容</t-button>
+      </template>
       <template v-else-if="hasCuts && failedCuts.length">
         <span style="color: var(--td-error-color, #d54941)">{{ failedCuts.length }} 个内容生成失败</span>
         <t-button v-for="cut in failedCuts" :key="cut.id" theme="danger" variant="outline" :disabled="busy" @click="onRetryBridgeCut(cut.id)">
