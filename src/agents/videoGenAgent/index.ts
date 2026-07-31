@@ -7,6 +7,7 @@ import type { AdEntry } from "@/agents/adLibraryAgent/schema";
 import { buildStageADraftMessages, buildReviseMessages, buildMotionReviseMessages, assembleStageAPrompt, assembleStageBPrompt } from "./prompt";
 import { evaluateDraft, evaluateRender } from "./evaluator";
 import { recordRevise } from "@/agents/shared/reviseHistory";
+import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-2";
@@ -143,57 +144,67 @@ async function renderDraftImage(
 }
 
 export async function generateDraftCut(bridgeCutId: number): Promise<DraftCutResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
-    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
-    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: stageADraftSchema,
-        system: systemPrompt,
-        messages: buildStageADraftMessages(episodeAnalysis, ad, narrative, tone),
-      },
-      { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
-    return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
-  } catch (e) {
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
-    throw e;
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+
+    try {
+      const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+      const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
+      const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: stageADraftSchema,
+          system: systemPrompt,
+          messages: buildStageADraftMessages(episodeAnalysis, ad, narrative, tone),
+        },
+        { taskClass: "videoGen-stageA-draftText", describe: `Cut ${bridgeCutId} 分镜草案文案`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      const evaluation = await evaluateDraft(draft);
+      const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
+      return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
+    } catch (e) {
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+      throw e;
+    }
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
 }
 
 export async function reviseDraftCut(bridgeCutId: number, feedback: string): Promise<DraftCutResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过草案，不能 revise`);
-
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
-    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
-    const existing = JSON.parse(cut.scriptText) as StageADraft;
-    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: stageADraftSchema,
-        system: systemPrompt,
-        messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
-      },
-      { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    const evaluation = await evaluateDraft(draft);
-    const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
-    await recordRevise("bridgeCutDraft", bridgeCutId, feedback, existing, draft);
-    return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
-  } catch (e) {
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
-    throw e;
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+    if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过草案，不能 revise`);
+
+    try {
+      const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+      const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
+      const existing = JSON.parse(cut.scriptText) as StageADraft;
+      const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: stageADraftSchema,
+          system: systemPrompt,
+          messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
+        },
+        { taskClass: "videoGen-stageA-reviseText", describe: `Cut ${bridgeCutId} 分镜草案 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      const evaluation = await evaluateDraft(draft);
+      const { imageUrl, assembledPrompt } = await renderDraftImage(bridgeCutId, episodeId, adId, ad, draft, cut.creativePlanId);
+      await recordRevise("bridgeCutDraft", bridgeCutId, feedback, existing, draft);
+      return { bridgeCutId, draft, assembledPrompt, imageUrl, evaluation };
+    } catch (e) {
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+      throw e;
+    }
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
 }
 
@@ -268,19 +279,24 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
 }
 
 export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.status !== "draftConfirmed") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没确认草案，不能渲染成片`);
-  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-
-  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const draft = JSON.parse(cut.scriptText) as StageADraft;
-    return await performStageBRender(bridgeCutId, cut.creativePlanId, draft);
-  } catch (e) {
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
-    throw e;
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.status !== "draftConfirmed") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没确认草案，不能渲染成片`);
+    if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+    try {
+      const draft = JSON.parse(cut.scriptText) as StageADraft;
+      return await performStageBRender(bridgeCutId, cut.creativePlanId, draft);
+    } catch (e) {
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+      throw e;
+    }
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
 }
 
@@ -290,33 +306,38 @@ export async function renderStageB(bridgeCutId: number): Promise<RenderResult> {
  * 只允许 cameraMovement/emotionalTone 变化，其余字段强制锁定成已确认草案的原值，防止 prompt 和已生成的静态图对不上。
  */
 export async function reviseStageBMotion(bridgeCutId: number, feedback: string): Promise<RenderResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
-  if (cut.status !== "done") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没有成片，不能调整运镜`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
-
-  await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
-    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
-    const existing = JSON.parse(cut.scriptText) as StageADraft;
-    const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: stageADraftSchema,
-        system: systemPrompt,
-        messages: buildMotionReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
-      },
-      { taskClass: "videoGen-stageB-motionRevise", describe: `Cut ${bridgeCutId} 运镜/节奏调整`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone, durationS: draft.durationS };
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(constrainedDraft) });
-    const result = await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
-    await recordRevise("bridgeCutMotion", bridgeCutId, feedback, existing, constrainedDraft);
-    return result;
-  } catch (e) {
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
-    throw e;
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.type !== "video") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 video，不能走 VideoGenAgent`);
+    if (cut.status !== "done") throw new Error(`Cut ${bridgeCutId} 当前状态是 ${cut.status}，还没有成片，不能调整运镜`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+    if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 缺少草案数据`);
+
+    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "rendering" });
+    try {
+      const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+      const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "video_gen_agent.md"), "utf-8");
+      const existing = JSON.parse(cut.scriptText) as StageADraft;
+      const { object: draft } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: stageADraftSchema,
+          system: systemPrompt,
+          messages: buildMotionReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
+        },
+        { taskClass: "videoGen-stageB-motionRevise", describe: `Cut ${bridgeCutId} 运镜/节奏调整`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      const constrainedDraft: StageADraft = { ...existing, cameraMovement: draft.cameraMovement, emotionalTone: draft.emotionalTone, durationS: draft.durationS };
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ scriptText: JSON.stringify(constrainedDraft) });
+      const result = await performStageBRender(bridgeCutId, cut.creativePlanId, constrainedDraft);
+      await recordRevise("bridgeCutMotion", bridgeCutId, feedback, existing, constrainedDraft);
+      return result;
+    } catch (e) {
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+      throw e;
+    }
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
 }

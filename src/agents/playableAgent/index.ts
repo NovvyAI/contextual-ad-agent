@@ -9,6 +9,7 @@ import { recordRevise } from "@/agents/shared/reviseHistory";
 import { gameSpecSchema, type GameSpec } from "./customGameSchema";
 import { buildGameSpecMessages, buildGameSpecReviseMessages, buildGameCodeMessages } from "./customGamePrompt";
 import { runGameSmokeTest } from "@/utils/gameSmokeTest";
+import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-2";
@@ -132,7 +133,11 @@ async function assemble(
   return finalizePlayablePackage(bridgeCutId, creativePlanId, gameHtml, config.title, config.ctaUrl, JSON.stringify(config), IMAGE_MODEL_KEY);
 }
 
-export async function assemblePlayable(bridgeCutId: number, selectedCandidateFrames: string[] = []): Promise<PlayableResult> {
+/**
+ * 不带并发锁的内部实现——generateCustomGame 失败时会回退调用这个逻辑，此时锁已经被
+ * generateCustomGame 自己占着，不能再用一次公开的 assemblePlayable（会自己把自己锁死）。
+ */
+async function assemblePlayableInner(bridgeCutId: number, selectedCandidateFrames: string[]): Promise<PlayableResult> {
   const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
   if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
   if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
@@ -158,31 +163,45 @@ export async function assemblePlayable(bridgeCutId: number, selectedCandidateFra
   }
 }
 
-export async function revisePlayable(bridgeCutId: number, feedback: string): Promise<PlayableResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
-
+export async function assemblePlayable(bridgeCutId: number, selectedCandidateFrames: string[] = []): Promise<PlayableResult> {
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
-    const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
-    const existing = JSON.parse(cut.scriptText) as PlayableConfig;
-    const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: playableConfigSchema,
-        system: systemPrompt,
-        messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
-      },
-      { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    const evaluation = await evaluatePlayable(config);
-    const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, adId, ad.tileCandidates ?? [], config, evaluation);
-    await recordRevise("playable", bridgeCutId, feedback, existing, config);
-    return { bridgeCutId, config, previewUrl, evaluation };
-  } catch (e) {
-    await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
-    throw e;
+    return await assemblePlayableInner(bridgeCutId, selectedCandidateFrames);
+  } finally {
+    releaseCutLock(bridgeCutId);
+  }
+}
+
+export async function revisePlayable(bridgeCutId: number, feedback: string): Promise<PlayableResult> {
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
+  try {
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+    if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
+
+    try {
+      const { episodeId, adId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+      const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_agent.md"), "utf-8");
+      const existing = JSON.parse(cut.scriptText) as PlayableConfig;
+      const { object: config } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: playableConfigSchema,
+          system: systemPrompt,
+          messages: buildReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
+        },
+        { taskClass: "playable-reviseText", describe: `Cut ${bridgeCutId} 小游戏配置 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      const evaluation = await evaluatePlayable(config);
+      const previewUrl = await assemble(bridgeCutId, episodeId, cut.creativePlanId, adId, ad.tileCandidates ?? [], config, evaluation);
+      await recordRevise("playable", bridgeCutId, feedback, existing, config);
+      return { bridgeCutId, config, previewUrl, evaluation };
+    } catch (e) {
+      await u.db("ab_bridgeCut").where("id", bridgeCutId).update({ status: "failed" });
+      throw e;
+    }
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
 }
 
@@ -265,65 +284,70 @@ async function generateAndVerifyGameCode(spec: GameSpec, assetUrls: string[], co
  * 这条路径和默认的 assemble()/assemblePlayable()/revisePlayable() 完全独立，不影响它们的行为。
  */
 export async function generateCustomGame(bridgeCutId: number, description: string, selectedCandidateFrames: string[] = []): Promise<CustomGameResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "playableGame") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 playableGame`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-  const creativePlanId = cut.creativePlanId;
-
-  const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(creativePlanId);
-  const specSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_gamespec.md"), "utf-8");
-  const codegenSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_codegen.md"), "utf-8");
-
-  let spec: GameSpec;
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: gameSpecSchema,
-        system: specSystemPrompt,
-        messages: buildGameSpecMessages(episodeAnalysis, ad, narrative, tone, description),
-      },
-      { taskClass: "playable-customGameSpec", describe: `Cut ${bridgeCutId} 自定义玩法规格`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    spec = object;
-  } catch (e) {
-    const fallback = await assemblePlayable(bridgeCutId);
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.type !== "playableGame") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 playableGame`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+    const creativePlanId = cut.creativePlanId;
+
+    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(creativePlanId);
+    const specSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_gamespec.md"), "utf-8");
+    const codegenSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_codegen.md"), "utf-8");
+
+    let spec: GameSpec;
+    try {
+      const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: gameSpecSchema,
+          system: specSystemPrompt,
+          messages: buildGameSpecMessages(episodeAnalysis, ad, narrative, tone, description),
+        },
+        { taskClass: "playable-customGameSpec", describe: `Cut ${bridgeCutId} 自定义玩法规格`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      spec = object;
+    } catch (e) {
+      const fallback = await assemblePlayableInner(bridgeCutId, selectedCandidateFrames);
+      return {
+        bridgeCutId,
+        previewUrl: fallback.previewUrl,
+        fallback: true,
+        fallbackReason: `玩法规格生成失败：${u.error(e).message}`,
+        evaluatorScore: fallback.evaluation.overallScore,
+        evaluatorFeedback: fallback.evaluation.feedback,
+      };
+    }
+
+    const referenceImages = resolveCandidateReferenceImages(episodeId, selectedCandidateFrames);
+    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
+    const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
+
+    if (codegenResult.ok) {
+      const previewUrl = await finalizePlayablePackage(bridgeCutId, creativePlanId, codegenResult.gameHtml, spec.title, spec.ctaUrl, JSON.stringify(spec), TEXT_MODEL_KEY);
+      return {
+        bridgeCutId,
+        previewUrl,
+        fallback: false,
+        spec,
+        evaluatorScore: 100,
+        evaluatorFeedback: "自定义生成通过了自动化冒烟测试（页面正常加载、无报错），这不是内容/玩法质量评分，实际体验是否符合预期需要打开预览确认。",
+      };
+    }
+
+    const fallback = await assemblePlayableInner(bridgeCutId, selectedCandidateFrames);
     return {
       bridgeCutId,
       previewUrl: fallback.previewUrl,
       fallback: true,
-      fallbackReason: `玩法规格生成失败：${u.error(e).message}`,
+      fallbackReason: `自定义生成尝试 ${MAX_CODEGEN_ATTEMPTS} 次后仍未通过冒烟测试：${codegenResult.lastError}`,
+      spec,
       evaluatorScore: fallback.evaluation.overallScore,
       evaluatorFeedback: fallback.evaluation.feedback,
     };
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
-
-  const referenceImages = resolveCandidateReferenceImages(episodeId, selectedCandidateFrames);
-  const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
-  const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
-
-  if (codegenResult.ok) {
-    const previewUrl = await finalizePlayablePackage(bridgeCutId, creativePlanId, codegenResult.gameHtml, spec.title, spec.ctaUrl, JSON.stringify(spec), TEXT_MODEL_KEY);
-    return {
-      bridgeCutId,
-      previewUrl,
-      fallback: false,
-      spec,
-      evaluatorScore: 100,
-      evaluatorFeedback: "自定义生成通过了自动化冒烟测试（页面正常加载、无报错），这不是内容/玩法质量评分，实际体验是否符合预期需要打开预览确认。",
-    };
-  }
-
-  const fallback = await assemblePlayable(bridgeCutId);
-  return {
-    bridgeCutId,
-    previewUrl: fallback.previewUrl,
-    fallback: true,
-    fallbackReason: `自定义生成尝试 ${MAX_CODEGEN_ATTEMPTS} 次后仍未通过冒烟测试：${codegenResult.lastError}`,
-    spec,
-    evaluatorScore: fallback.evaluation.overallScore,
-    evaluatorFeedback: fallback.evaluation.feedback,
-  };
 }
 
 export interface CustomGameReviseResult {
@@ -341,54 +365,59 @@ export interface CustomGameReviseResult {
  * 这里失败的兜底是"什么都不做，保留用户已有的、能跑的游戏"，不能用一个通用的翻牌配对顶掉用户本来满意、只是想小改的游戏。
  */
 export async function reviseCustomGame(bridgeCutId: number, feedback: string): Promise<CustomGameReviseResult> {
-  const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
-  if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
-  if (cut.type !== "playableGame") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 playableGame`);
-  if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
-  if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
-
-  let existing: GameSpec;
+  if (!acquireCutLock(bridgeCutId)) throw cutBusyError(bridgeCutId);
   try {
-    const parsed = JSON.parse(cut.scriptText);
-    if (typeof parsed.gameType !== "string") throw new Error("不是自定义生成的游戏");
-    existing = parsed as GameSpec;
-  } catch {
-    throw new Error(`Cut ${bridgeCutId} 当前不是自定义生成的游戏（可能是默认翻牌配对），不能用这个 revise，改用 run_sub_agent_playable_revise`);
+    const cut = await u.db("ab_bridgeCut").where("id", bridgeCutId).first();
+    if (!cut) throw new Error(`Cut ${bridgeCutId} 不存在`);
+    if (cut.type !== "playableGame") throw new Error(`Cut ${bridgeCutId} 类型是 ${cut.type}，不是 playableGame`);
+    if (cut.creativePlanId == null) throw new Error(`Cut ${bridgeCutId} 缺少 creativePlanId`);
+    if (!cut.scriptText) throw new Error(`Cut ${bridgeCutId} 还没有生成过，不能 revise`);
+
+    let existing: GameSpec;
+    try {
+      const parsed = JSON.parse(cut.scriptText);
+      if (typeof parsed.gameType !== "string") throw new Error("不是自定义生成的游戏");
+      existing = parsed as GameSpec;
+    } catch {
+      throw new Error(`Cut ${bridgeCutId} 当前不是自定义生成的游戏（可能是默认翻牌配对），不能用这个 revise，改用 run_sub_agent_playable_revise`);
+    }
+
+    const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
+    const specSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_gamespec.md"), "utf-8");
+    const codegenSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_codegen.md"), "utf-8");
+
+    let spec: GameSpec;
+    try {
+      const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
+        {
+          schema: gameSpecSchema,
+          system: specSystemPrompt,
+          messages: buildGameSpecReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
+        },
+        { taskClass: "playable-customGameSpecRevise", describe: `Cut ${bridgeCutId} 自定义玩法规格 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
+      );
+      spec = object;
+    } catch (e) {
+      return { bridgeCutId, success: false, reviseFailedReason: `规格调整失败：${u.error(e).message}，原来的游戏保持不变` };
+    }
+
+    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec);
+    const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
+    if (!codegenResult.ok) {
+      return { bridgeCutId, success: false, reviseFailedReason: `调整后的游戏未通过冒烟测试：${codegenResult.lastError}，原来的游戏保持不变`, spec };
+    }
+
+    const previewUrl = await finalizePlayablePackage(bridgeCutId, cut.creativePlanId, codegenResult.gameHtml, spec.title, spec.ctaUrl, JSON.stringify(spec), TEXT_MODEL_KEY);
+    await recordRevise("customGame", bridgeCutId, feedback, existing, spec);
+    return {
+      bridgeCutId,
+      success: true,
+      previewUrl,
+      spec,
+      evaluatorScore: 100,
+      evaluatorFeedback: "自定义生成通过了自动化冒烟测试（页面正常加载、无报错），这不是内容/玩法质量评分，实际体验是否符合预期需要打开预览确认。",
+    };
+  } finally {
+    releaseCutLock(bridgeCutId);
   }
-
-  const { episodeId, episodeAnalysis, ad, narrative, tone } = await loadPlanContext(cut.creativePlanId);
-  const specSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_gamespec.md"), "utf-8");
-  const codegenSystemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "playable_custom_codegen.md"), "utf-8");
-
-  let spec: GameSpec;
-  try {
-    const { object } = await u.Ai.Text(TEXT_MODEL_KEY).invokeObject(
-      {
-        schema: gameSpecSchema,
-        system: specSystemPrompt,
-        messages: buildGameSpecReviseMessages(episodeAnalysis, ad, narrative, tone, existing, feedback),
-      },
-      { taskClass: "playable-customGameSpecRevise", describe: `Cut ${bridgeCutId} 自定义玩法规格 revise`, relatedObjects: String(bridgeCutId), projectId: episodeId },
-    );
-    spec = object;
-  } catch (e) {
-    return { bridgeCutId, success: false, reviseFailedReason: `规格调整失败：${u.error(e).message}，原来的游戏保持不变` };
-  }
-
-  const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec);
-  const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
-  if (!codegenResult.ok) {
-    return { bridgeCutId, success: false, reviseFailedReason: `调整后的游戏未通过冒烟测试：${codegenResult.lastError}，原来的游戏保持不变`, spec };
-  }
-
-  const previewUrl = await finalizePlayablePackage(bridgeCutId, cut.creativePlanId, codegenResult.gameHtml, spec.title, spec.ctaUrl, JSON.stringify(spec), TEXT_MODEL_KEY);
-  await recordRevise("customGame", bridgeCutId, feedback, existing, spec);
-  return {
-    bridgeCutId,
-    success: true,
-    previewUrl,
-    spec,
-    evaluatorScore: 100,
-    evaluatorFeedback: "自定义生成通过了自动化冒烟测试（页面正常加载、无报错），这不是内容/玩法质量评分，实际体验是否符合预期需要打开预览确认。",
-  };
 }
