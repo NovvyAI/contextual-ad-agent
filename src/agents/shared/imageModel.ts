@@ -8,7 +8,8 @@ import u from "@/utils";
  */
 export const IMAGE_MODEL_OPTIONS = [
   { key: "openai:gpt-image-2", label: "GPT Image 2" },
-  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2)" },
+  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2，中转)" },
+  { key: "google:gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image（官方直连）" },
 ] as const;
 
 export type ImageModelKey = (typeof IMAGE_MODEL_OPTIONS)[number]["key"];
