@@ -222,6 +222,10 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
   if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
   const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+  // 带上真实可公网访问的 url（生产环境配了 ossURL 才是真的公网地址，本机 dev 环境是 localhost，
+  // 供应商脚本自己会判断是不是本地地址，本地地址就还是退回 base64 直传）——
+  // Seedance 的人物素材合规审核走 /v1/assets/create 只认公网 url，不接受 base64 临时直链
+  const draftImageUrl = await u.oss.getFileUrl(draftSegment.filePath);
   const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
   if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
   const episodeId = plan.episodeId;
@@ -232,7 +236,7 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
       resolution: "1080p",
       aspectRatio: "9:16",
       prompt: assembleStageBPrompt(draft),
-      referenceList: [{ type: "image", base64: draftImageBase64 }],
+      referenceList: [{ type: "image", base64: draftImageBase64, url: draftImageUrl }],
       mode: ["singleImage"],
     },
     { taskClass: "videoGen-stageB-render", describe: `Cut ${bridgeCutId} 成片渲染`, relatedObjects: String(bridgeCutId), projectId: episodeId },
