@@ -12,6 +12,26 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-31 新增 Google 官方 Gemini 直连图片模型，替换掉 grsai 中转的 Nano Banana 选项
+
+**用户意见 / 触发原因**：gpt-image-2 中转（napi.moretoken.ai）反复撞上"The origin web server did not return a complete response within the 120-second Proxy Read Timeout window"，用户问"其他的模型比如 gemini 的 image 模型能代替 gpt-image-2 么"，先接了 grsai 中转的 nano-banana-2 作为备选；之后用户在自己的 Google Cloud 项目里申请到了 AI Studio 官方 API Key，要求接一个不经过任何中转的官方直连选项，验证通过之后又明确要求把 grsai 这个选项去掉，只保留 gpt-image-2（中转）和 Google 官方直连两个。
+
+**改了什么**：新增 `data/vendor/google.ts`——直连 `generativelanguage.googleapis.com/v1beta`，走 `generateContent` 接口的多模态图片输出（不是 Imagen 的 predict 接口），鉴权用 `x-goog-api-key` 请求头，同步加了 130 秒超时保护；请求地址做成可配置的 `baseUrl`（默认官方地址，`.env` 里的 `GOOGLE_BASE_URL` 可以覆盖，不填就用默认值）。`src/lib/syncEnvVendors.ts` 的 `ENV_VENDOR_MAP` 加一行 `google`。`src/agents/shared/imageModel.ts` 的 `IMAGE_MODEL_OPTIONS` 去掉 `grsai:nano-banana-2`，加上 `google:gemini-3.1-flash-image`；`ActionBar.vue` 的下拉框同步更新。
+
+**验证**：真实调用 `u.Ai.Image('google:gemini-3.1-flash-image').run(...)`，纯文生图和带参考图编辑（Nano Banana 风格的图片编辑）均一次成功，参考图保真度良好；把 `baseUrl` 从硬编码改成可配置之后重启服务、重新调用一次确认默认地址依然正常工作。`npx tsc --noEmit -p .` clean。
+
+---
+
+## 2026-07-31 内容生成前新增图片模型选择——选定后分镜草案/游戏素材全程沿用同一个模型
+
+**用户意见 / 触发原因**：gpt-image-2 中转反复超时失败，用户明确要求"在内容生成阶段前，给用户按钮或者下拉框让用户选择用 gpt-image-2 模型还是 gemini 模型，然后一旦选定后，后续的分镜草案，生成游戏都用这个 image 模型"，不要每次调用各自决定。
+
+**改了什么**：`ab_creativePlan` 新增 `imageModelKey` 列（`fixDB.ts`/`initDB.ts`）。新增 `src/agents/shared/imageModel.ts`，统一维护可选模型列表 + `resolveImageModelKey(creativePlanId)`（老数据/没选过的方案没有这一列，回退到系统默认 `gpt-image-2`）。`videoGenAgent`（Stage A 草案图）、`playableAgent`（游戏素材、AI 兜底 tile 生成）里原来硬编码 `IMAGE_MODEL_KEY` 常量的调用点全部改成读这个函数。`ActionBar.vue`"生成内容"按钮旁加下拉框，选定的值随 `bridgeCut:generate` 事件传给后端，写入 `imageModelKey`。
+
+**验证**：浏览器走查选择不同模型后触发生成，确认 `ab_creativePlan.imageModelKey` 正确写入；查大模型调用日志确认分镜草案图/游戏素材生成都用了选定的模型，不是默认值。`npx tsc --noEmit -p .` clean。
+
+---
+
 ## 2026-07-31 如何让生成的游戏画面衔接视频结尾——候选素材新增视频分镜草案图
 
 **用户意见 / 触发原因**：用户问"生成的视频画面风格可以延续到游戏里么，怎么延续"，发现这个方向完全没做——候选素材机制（M9）只支持 Episode 帧，游戏生成和视频生成两边画面完全断开。用户明确要求把 video cut 已经生成好的分镜草案图、以及渲染完成片抽的几帧（不只是首帧）都作为自定义玩法生成的参考素材/参考图。做完之后进一步问"如果想要生成的游戏正好能衔接住生成的视频结尾，该怎么做"，把已经做好的几个能力汇总成一份实操指引，记在这里。
@@ -25,6 +45,36 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 4. 如果游戏生成完之后发现视频结尾其实没完全呼应上游戏的实际样子，可以反过来对视频提修改意见（比如"结尾画面呼应一下小游戏卡面素材"），触发 `reviseDraftCut` 用游戏已经生成好的真实素材重画最后一帧，形成双向衔接（这条路径是 M9 已经做好的）。
 
 **验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 全程 clean。真实调用 `generateCustomGame(bridgeCutId, description, [VIDEO_DRAFT_CANDIDATE_KEY])`：确认候选 key 正确解析出 video cut 的草案图（不是 Episode 帧），素材生成成功、游戏组装完成、`fallback:false`。压缩前后对比：未压缩时（约 3.38M 字符）图片编辑请求连续两次撞上 120 秒网关超时，压缩到约 371K 字符后重试即成功。浏览器走查确认候选素材勾选列表正确展示"视频分镜草案图"选项，和 Episode 候选帧共用同一套勾选/展示逻辑。诚实记录一点局限：一次真实测试里，虽然参考图正确带上了视频草案图，但最终生成的素材画风偏向广告本身的糖果主题、没有明显带出草案图里的戏剧化场景——说明参考图只是提供风格线索，最终画面还是由素材描述文字主导，这也是上面"怎么用"第 3 点强调要在描述里写清楚衔接需求的原因。
+
+---
+
+## 2026-07-31 生成/revise 加进程内并发锁，修复并发调用互相覆盖状态的真实 bug
+
+**用户意见 / 触发原因**：用户报告一个真实现象——"bridgeCut 42 当前状态为 rendering，不是 failed，无法重试"，但之前的消息又说这个 cut 状态是 failed。排查发现是并发触发（几乎同时点两次重试，或按钮+聊天各触发一次）导致的竞态：两次调用都在查完 `cut.status` 之后才开始跑耗时的模型调用，谁的结果后写入数据库谁生效——已经生成好的草案被后到的失败结果错误覆盖成 `failed`。
+
+**改了什么**：新增 `src/agents/shared/cutLock.ts`，用内存 `Set<number>` 在函数最开始、没有任何 `await` 之前做同步检查+占用（利用 JS 单线程特性关闭这个竞态窗口，比"先查数据库状态再判断"更可靠；只对单进程部署场景生效，够用）。包进 `videoGenAgent` 的 4 个入口（`generateDraftCut`/`reviseDraftCut`/`renderStageB`/`reviseStageBMotion`）和 `playableAgent` 的 4 个入口（`assemblePlayable`/`revisePlayable`/`generateCustomGame`/`reviseCustomGame`）。为避免 `generateCustomGame` 失败兜底调用 `assemblePlayable` 时把自己锁死，把 `assemblePlayable` 拆成不加锁的 `assemblePlayableInner`（核心逻辑）+ 加锁的 `assemblePlayable`（对外入口），兜底路径直接调 `assemblePlayableInner`。
+
+**验证**：真实触发两个几乎同时的 `generateDraftCut` 调用，一个正常成功、另一个立刻收到"正在生成中，请稍候"的拒绝；确认锁在成功/失败后都正确释放（紧接着的第三次调用能正常执行）。`npx tsc --noEmit -p .` clean。
+
+---
+
+## 2026-07-31 图片生成请求加超时保护，修复请求卡住无限等待且不报错的问题
+
+**用户意见 / 触发原因**：一次自定义小游戏素材生成卡住 24 分钟以上，连中转本身的 120 秒网关超时报错都没能触发——排查发现 `data/vendor/openai.ts` 的 `imageRequest` 对 axios/fetch 请求完全没配置超时，请求方会一直挂着等，永远不会主动放弃。
+
+**改了什么**：`/images/edits`（axios）加 130 秒 `timeout` 选项，`/images/generations`（fetch）加 `AbortSignal.timeout(130000)`，超时后抛出明确的中文错误信息而不是无限挂起。验证过程中发现 VM 沙箱（`src/utils/vm.ts`）没有把 `AbortSignal` 加进允许访问的全局变量白名单，导致新代码报"AbortSignal is not defined"，一并修复（加进沙箱对象）。
+
+**验证**：真实测试 fetch 和 axios 两条路径，超时场景下都能正确抛出错误、不再无限挂起；确认沙箱内正常代码路径（非超时场景）未受影响，图片生成照常成功。`npx tsc --noEmit -p .` clean。
+
+---
+
+## 2026-07-31 成片时长从固定 6 秒改成模型自己在 6-15 秒范围内决定
+
+**用户意见 / 触发原因**：用户问"为什么成片是 6 秒"，得知是硬编码的 `STAGE_B_DURATION_S=6` 之后，明确要求"把这个 6 秒设置改成一个范围，比如 6 到 15 秒，具体时间让生成视频 agent 自由发挥"。
+
+**改了什么**：`videoGenAgent/schema.ts` 的 `stageADraftSchema` 新增 `durationS` 字段（`z.number().min(6).max(15)`，describe 里明确要求模型根据画面信息量/运镜复杂度/情绪过渡自己判断，不要不假思索地固定选某个值）；`performStageBRender` 用 `draft.durationS ?? 6`（老数据兼容）替代硬编码常量。运镜专用 revise（`reviseStageBMotion`/`buildMotionReviseMessages`）允许连带调整 `durationS`，因为时长本质上是"节奏"的一部分，和运镜/情绪基调放在一起改。`data/skills/video_gen_agent.md`、`session_agent_decision.md` 同步补充说明。
+
+**验证**：真实生成多条分镜草案，确认 `durationS` 落在 6-15 范围内且随画面内容变化（不是固定值）；渲染出的成片实际时长和 `durationS` 对应。`npx tsc --noEmit -p .` clean。
 
 ---
 
@@ -44,6 +94,26 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 **踩的坑**：第一版 `acquireCustomGameAssets` 复用了翻牌配对路径"真实截图优先"的逻辑，把 `tileCandidates`（AdLibraryAgent 挑出的完整游戏界面截图）直接塞进 GameSpec 的结构化素材槽位。真实测试一个三消游戏时，发现棋盘上有 2 颗"糖果"实际上是缩小的完整游戏界面截图，和其他棋子风格完全不搭——翻牌配对的素材槽位是同质的（随便一张有辨识度的图都行），但自定义游戏的槽位有具体描述（"单个独立糖果图标"/"棋盘背景"），不能用通用截图硬填。修复：自定义游戏的素材永远按每条具体描述单独用 gpt-image-1 生成，不复用 `tileCandidates`。
 
 **验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 全程 clean。真实调用 `generateCustomGame`：①"找不同"描述（无需素材，纯 SVG/CSS）首次尝试即通过冒烟测试，浏览器实际通关验证——5 处差异全部能正确点选识别、完成后弹出"信号恢复"结束卡，`sandbox="allow-scripts"` 的 iframe 里交互和跨帧 `postMessage` 均正常；②"三消"描述（需要 12 张素材图，走真实 gpt-image-1 生成），发现并修复了上述截图错配问题后，重新验证棋盘素材全部是风格一致的 AI 生成图标，swap 交互和"不成对就自动复位不扣步数"的规则均符合规格。重试反馈机制单独验证：用一个环境变量临时让冒烟测试强制失败（验证完后已移除），确认失败原因正确地被拼进下一次生成的 prompt（"上一次生成失败的原因：……请修正这个问题"）。这次验证过程中连续 5 次撞到同一个上游服务临时不可用的报错（`Upstream service temporarily unavailable`），和这次改动无关——每次都能看到代码正确走到了预期的重试/兜底分支，只是兜底调用本身也需要真实模型调用，撞上了当时确实存在的服务不稳定；后续应该找一个 API 更稳定的时间窗口，再补一次"冒烟测试失败 → 干净地回退成功"的完整链路验证。
+
+---
+
+## 2026-07-30 修复 ActionBar 卡死显示"内容生成中"——cut 状态判断没有按当前 approved 方案过滤
+
+**用户意见 / 触发原因**：用户反馈 ActionBar 一直显示"内容生成中..."，即使实际内容已经生成完毕。排查发现一个 episode 理论上不该同时存在两份 approved 方案，但实际数据里出现过（历史遗留/反复测试导致）——原来的 cut 状态相关 computed 是对 `sessionState.bridgeCuts` 全量判断，混进了另一份（已经 done 的）approved 方案的 cut，把当前方案的按钮状态判断全部打乱。
+
+**改了什么**：`frontend/src/components/chat/ActionBar.vue` 新增 `currentPlanCuts` computed，按 `approvedPlan.id` 过滤 `bridgeCuts` 之后，所有后续状态判断（`videoDraftsReadyToConfirm`/`gameCut`/`readyToAssemblePlayable`/`allCutsDone`/`failedCuts`）全部基于这个过滤后的列表，不再用全量 `bridgeCuts`。
+
+**验证**：浏览器实测确认按钮状态恢复正常，正确显示"确认内容，进入终审与落地"而不是卡在"内容生成中"。
+
+---
+
+## 2026-07-30 生成创意方案/生成内容点击后加即时反馈消息，避免用户以为没有响应
+
+**用户意见 / 触发原因**：用户反馈点击"生成创意方案"和内容生成按钮之后界面没有任何反馈，容易以为点击没生效——实际上是模型调用本身需要一段时间，只是没有任何中间状态提示。
+
+**改了什么**：`src/socket/routes/sessionAgent.ts` 的 `plan:generate` 处理器、`src/agents/sessionAgent/actions.ts` 的 `generateContentAction`，在触发耗时的生成流程之前先发一条 assistant 消息（"已确认，正在生成分镜草案，请稍候..."之类）作为即时确认，不用等生成完才看到第一条回复。
+
+**验证**：浏览器实测点击后立刻出现确认消息，生成完成后再收到正式结果消息，两条消息不冲突。
 
 ---
 
