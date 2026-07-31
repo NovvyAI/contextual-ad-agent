@@ -44,6 +44,13 @@ export default (nsp: Namespace) => {
 
     // plan:generate —— 确定性代码，不经过 LLM。选哪些广告素材参与是多选下拉框操作，不适合聊天触发，保留纯按钮
     socket.on("plan:generate", async (data: { adIds: number[] }) => {
+      // 先推一条即时确认消息——方案生成要跑多次真实模型调用，不会立刻有结果，
+      // 不然点击按钮之后界面上什么反应都没有，用户会以为点击没生效
+      const ackMsg = resTool.newMessage("assistant");
+      const ackText = ackMsg.text("已收到，正在生成创意方案，请稍候...");
+      ackText.complete();
+      ackMsg.complete();
+
       try {
         const plans = await state.startPlanning(episodeId, data.adIds);
         for (const plan of plans) {

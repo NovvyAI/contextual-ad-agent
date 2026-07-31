@@ -58,6 +58,13 @@ export async function confirmPlanAction(resTool: ResTool, episodeId: number, pla
 
 /** 为已确认方案生成内容（固定两段式：只生成 video 段草案，playableGame 段留给 assemblePlayableAction） */
 export async function generateContentAction(resTool: ResTool, episodeId: number, creativePlanId: number): Promise<void> {
+  // 先推一条即时确认消息——分镜草案要跑真实模型调用，不会立刻有结果，
+  // 不然确认方案之后界面上什么反应都没有，用户会以为点击没生效
+  const ackMsg = resTool.newMessage("assistant");
+  const ackText = ackMsg.text("已确认，正在生成分镜草案，请稍候...");
+  ackText.complete();
+  ackMsg.complete();
+
   try {
     const cuts = await state.createBridgeCuts(episodeId, creativePlanId);
     const videoCuts = cuts.filter((cut) => cut.type === "video");
