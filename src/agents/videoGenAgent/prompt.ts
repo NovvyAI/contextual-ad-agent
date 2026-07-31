@@ -123,7 +123,10 @@ export function assembleStageAPrompt(draft: StageADraft, hasEpisodeFrame: boolea
     refLines.length > 0 ? `[参考图]\n${refLines.join("\n")}` : null,
     `[分镜设计]\n${transitionParts.join("，")}。\n` +
       `景别：${draft.shotSize}（${SHOT_SIZE_EN[draft.shotSize] ?? draft.shotSize}）；运镜：${draft.cameraMovement}（${CAMERA_MOVEMENT_EN[draft.cameraMovement] ?? draft.cameraMovement}）。\n` +
-      `光影氛围：${draft.lightingMood}。\n情绪基调：${draft.emotionalTone}。`,
+      `光影氛围：${draft.lightingMood}。\n情绪基调：${draft.emotionalTone}。\n` +
+      // 这张图后续会被送进 Seedance 渲染成片——按其人物素材合规要求，只支持素人、不支持明星人物。
+      // 不限定具体画风（写实/半写实/插画都可以），唯一要求是不指向任何真实存在的公众人物/明星
+      `人物要求：不要参考、模仿任何真实存在的公众人物/明星的相貌特征。`,
   ].filter((s): s is string => s != null);
 
   return sections.join("\n\n");
