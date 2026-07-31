@@ -10,6 +10,8 @@ import { gameSpecSchema, type GameSpec } from "./customGameSchema";
 import { buildGameSpecMessages, buildGameSpecReviseMessages, buildGameCodeMessages } from "./customGamePrompt";
 import { runGameSmokeTest } from "@/utils/gameSmokeTest";
 import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
+import { sampleFrames } from "@/utils/video";
+import { zipImage } from "@/utils/vm";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 const IMAGE_MODEL_KEY = "openai:gpt-image-2";
@@ -32,6 +34,46 @@ function resolveCandidateReferenceImages(episodeId: number, selectedCandidateFra
     .map((filename) => u.getPath(["episode", String(episodeId), "frames", filename]))
     .filter((p) => fs.existsSync(p))
     .map((p) => ({ type: "image" as const, base64: fs.readFileSync(p).toString("base64") }));
+}
+
+const VIDEO_REFERENCE_FRAME_COUNT = 3;
+
+/**
+ * 同方案下 video cut 已经生成好的画面——分镜草案图 + 成片抽帧（不止首帧，均匀抽 N 张）——
+ * 作为自定义玩法生成素材的额外参考图，让游戏素材画风能延续视频里已经定下来的样子，不是各画各的。
+ * video cut 不存在、还没生成草案、还没渲染成片都不算错，能拿到多少算多少，不阻塞主流程。
+ */
+async function resolveVideoCutReferenceImages(creativePlanId: number): Promise<Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[]> {
+  const videoCut = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId).where("type", "video").first();
+  if (!videoCut) return [];
+
+  const images: Extract<import("@/utils/ai").ReferenceList, { type: "image" }>[] = [];
+
+  const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "draftImage").where("isSelected", 1).first();
+  if (draftSegment?.filePath) {
+    // Stage A 草案图是 gpt-image-2 直出的无损 PNG（1024x1536，未压缩前大概 2-3MB base64），
+    // 当参考图只需要传达画风/构图，不需要这么大——压成 JPEG 控制在 300KB 以内，减轻请求体积，
+    // 降低这类多参考图请求撞上供应商 120 秒网关超时的概率
+    const rawBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
+    const compressedDataUri = await zipImage(`data:image/png;base64,${rawBase64}`, 300 * 1024);
+    images.push({ type: "image", base64: compressedDataUri.split(",")[1] });
+  }
+
+  const renderSegment = await u.db("ab_generatedSegment").where("bridgeCutId", videoCut.id).where("stage", "finalRender").where("isSelected", 1).first();
+  if (renderSegment?.filePath) {
+    try {
+      const localVideoPath = u.getPath(["oss", renderSegment.filePath]);
+      const outDir = u.getPath(["bridgeCut", String(videoCut.id), "referenceFrames"]);
+      const frames = await sampleFrames(localVideoPath, outDir, { mode: "count", count: VIDEO_REFERENCE_FRAME_COUNT, includeLast: false });
+      for (const frame of frames) {
+        images.push({ type: "image", base64: fs.readFileSync(frame.path).toString("base64") });
+      }
+    } catch (e) {
+      console.error(`[playableAgent] 成片抽帧失败，跳过这部分参考图: ${u.error(e).message}`);
+    }
+  }
+
+  return images;
 }
 
 export interface PlayableResult {
@@ -319,7 +361,7 @@ export async function generateCustomGame(bridgeCutId: number, description: strin
       };
     }
 
-    const referenceImages = resolveCandidateReferenceImages(episodeId, selectedCandidateFrames);
+    const referenceImages = [...resolveCandidateReferenceImages(episodeId, selectedCandidateFrames), ...(await resolveVideoCutReferenceImages(creativePlanId))];
     const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
     const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
 
@@ -401,7 +443,8 @@ export async function reviseCustomGame(bridgeCutId: number, feedback: string): P
       return { bridgeCutId, success: false, reviseFailedReason: `规格调整失败：${u.error(e).message}，原来的游戏保持不变` };
     }
 
-    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec);
+    const referenceImages = await resolveVideoCutReferenceImages(cut.creativePlanId);
+    const assetUrls = await acquireCustomGameAssets(bridgeCutId, episodeId, spec, referenceImages);
     const codegenResult = await generateAndVerifyGameCode(spec, assetUrls, codegenSystemPrompt);
     if (!codegenResult.ok) {
       return { bridgeCutId, success: false, reviseFailedReason: `调整后的游戏未通过冒烟测试：${codegenResult.lastError}，原来的游戏保持不变`, spec };
