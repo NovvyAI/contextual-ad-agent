@@ -2,13 +2,12 @@ import u from "@/utils";
 
 /**
  * 图片生成模型的可选项——gpt-image-2 中转（napi.moretoken.ai）不稳定，
- * grsai 中转的 nano-banana-2（Gemini 图片模型）是备选，两边接口都已经真实验证过能用。
+ * Google 官方直连（generativelanguage.googleapis.com）是备选，两边接口都已经真实验证过能用。
  * 用户在内容生成前选一次，选定后写进 ab_creativePlan.imageModelKey，这份方案下所有
  * 分镜草案/游戏素材生成（包括后续 revise）都读这一列，不用每次调用各自决定。
  */
 export const IMAGE_MODEL_OPTIONS = [
   { key: "openai:gpt-image-2", label: "GPT Image 2" },
-  { key: "grsai:nano-banana-2", label: "Gemini (Nano Banana 2，中转)" },
   { key: "google:gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image（官方直连）" },
 ] as const;
 
