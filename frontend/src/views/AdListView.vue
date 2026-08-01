@@ -10,6 +10,8 @@ interface AdRow {
   adType: "video" | "image" | "text";
   status: string;
   brandName: string | null;
+  sourceFilePath: string | null;
+  textContent: string | null;
   createTime: number;
 }
 
@@ -22,6 +24,15 @@ const newAdType = ref<"video" | "image" | "text">("image");
 const newSourceFilePath = ref("");
 const newTextContent = ref("");
 const newBrandName = ref("");
+
+const editDialogVisible = ref(false);
+const editing = ref(false);
+const editAdId = ref<number | null>(null);
+const editAdType = ref<"video" | "image" | "text">("image");
+const editName = ref("");
+const editBrandName = ref("");
+const editSourceFilePath = ref("");
+const editTextContent = ref("");
 
 async function loadAds() {
   loading.value = true;
@@ -75,6 +86,37 @@ async function handleAnalyze(adId: number) {
   MessagePlugin.info("已开始分析，完成后会自动刷新状态");
   await loadAds();
   pollUntilSettled();
+}
+
+function openEditDialog(row: AdRow) {
+  editAdId.value = row.id;
+  editAdType.value = row.adType;
+  editName.value = row.name;
+  editBrandName.value = row.brandName ?? "";
+  editSourceFilePath.value = row.sourceFilePath ?? "";
+  editTextContent.value = row.textContent ?? "";
+  editDialogVisible.value = true;
+}
+
+async function handleEditSubmit() {
+  if (!editAdId.value || !editName.value) return;
+  editing.value = true;
+  try {
+    const res = (await http.post("/api/ad/updateAd", {
+      adId: editAdId.value,
+      name: editName.value,
+      brandName: editBrandName.value || undefined,
+      sourceFilePath: editAdType.value === "text" ? undefined : editSourceFilePath.value,
+      textContent: editAdType.value === "text" ? editTextContent.value : undefined,
+    })) as any;
+    MessagePlugin.success(res.data?.contentChanged ? "已保存，内容已变更，需要重新点击「开始分析」" : "已保存");
+    editDialogVisible.value = false;
+    await loadAds();
+  } catch (e: any) {
+    MessagePlugin.error(e?.message ?? "保存失败");
+  } finally {
+    editing.value = false;
+  }
 }
 
 async function handleDelete(adId: number) {
@@ -138,11 +180,36 @@ onUnmounted(() => {
       <template #op="{ row }">
         <t-space>
           <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
+          <t-button size="small" variant="outline" @click="openEditDialog(row)">编辑</t-button>
           <t-popconfirm content="确定删除这条创意素材吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
             <t-button size="small" theme="danger" variant="outline">删除</t-button>
           </t-popconfirm>
         </t-space>
       </template>
     </t-table>
+
+    <t-dialog
+      v-model:visible="editDialogVisible"
+      header="编辑创意素材"
+      :confirm-btn="{ content: '保存', loading: editing }"
+      :on-confirm="handleEditSubmit"
+    >
+      <t-space direction="vertical" style="width: 100%">
+        <t-input v-model="editName" placeholder="名称" />
+        <t-input v-model="editBrandName" placeholder="品牌名（可选）" />
+        <template v-if="editAdType === 'text'">
+          <t-textarea v-model="editTextContent" placeholder="广告文案" />
+        </template>
+        <template v-else>
+          <t-space>
+            <t-input v-model="editSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
+            <LocalFilePicker @uploaded="(p) => (editSourceFilePath = p)" />
+          </t-space>
+        </template>
+        <p style="margin: 0; color: var(--td-text-color-secondary, #666); font-size: 12px">
+          如果改动了{{ editAdType === "text" ? "文案" : "文件路径" }}，这条素材的分析结果会作废，保存后需要重新点击"开始分析"；只改名称/品牌名不影响已有分析结果。
+        </p>
+      </t-space>
+    </t-dialog>
   </div>
 </template>
