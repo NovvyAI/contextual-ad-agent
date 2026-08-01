@@ -45,8 +45,17 @@ const creativePlanIdInputSchema = z.object({
  * 这个异常会在 AI SDK 的工具执行链路里被吞掉，聊天框里不会有任何反馈——用户体感就是"发了消息但完全没反应"，
  * 而不是一条看得懂的失败提示。这里统一兜底：先给用户推一张明确的错误卡片（不依赖模型后续会不会再开口说话），
  * 再把失败原因如实当工具结果返回给模型，模型如果还有后续步骤可以据此再用文字跟用户解释。
+ *
+ * 同时在这里统一推一条"正在处理"的即时确认消息——聊天触发的 revise 走到这里之前，模型的文字回复
+ * 可能什么都还没说就直接调用了工具，fn() 本身又是真实的模型调用（图片/视频生成常常要几十秒到几分钟），
+ * 这段时间之前完全没有任何反馈，用户体感和点完按钮后台没反应一样。和 actions.ts 里按钮触发流程的
+ * "已确认，正在生成...请稍候" 是同一个思路，这里统一给所有走 safeRevise 的聊天工具补上。
  */
 async function safeRevise(ctx: AgentContext, label: string, fn: () => Promise<string>): Promise<string> {
+  const ackMsg = ctx.resTool.newMessage("assistant");
+  const ackText = ackMsg.text(`已收到，正在${label}，请稍候...`);
+  ackText.complete();
+  ackMsg.complete();
   try {
     return await fn();
   } catch (e) {
