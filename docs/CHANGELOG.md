@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-31 聊天触发的 revise 也加"正在处理"即时确认消息
+
+**用户意见 / 触发原因**：用户反馈"每次用户提出修改意见，包括对分镜、对视频、对生成游戏的，用户点击完发送后，对话窗口下面最好显示服务器在干什么，因为发送完修改意见后页面没有反应，不知道背后的 agent 是否在运行、是什么状态"。排查发现聊天触发的 5 个 revise 工具（方案/分镜草案/运镜专用/默认互动游戏/自定义游戏）背后统一走 `safeRevise` 包装，这个函数原来只在失败时才会推消息，成功路径从"模型决定调用这个工具"到"revise 完成推结果卡片"之间完全没有任何反馈——如果模型在调用工具前没有先说点什么，这段时间（图片/视频生成常常要几十秒到几分钟）聊天框里就是纯空白，和按钮触发流程已经有的"已确认，正在生成...请稍候"即时确认消息不是一个体验。
+
+**改了什么**：`src/agents/sessionAgent/index.ts` 的 `safeRevise(ctx, label, fn)` 在 `await fn()` 之前统一推一条 `已收到，正在${label}，请稍候...` 的 assistant 消息（复用 `resTool.newMessage().text().complete()` 这个和 `actions.ts` 里按钮触发流程完全一样的即时确认消息模式），5 个 revise 工具（`run_sub_agent_director_plan_revise`/`run_sub_agent_bridge_video_revise`/`run_sub_agent_bridge_video_revise_motion`/`run_sub_agent_playable_revise`/`run_sub_agent_custom_game_revise`）都走这一个函数，不用逐个加。
+
+**验证**：`npx tsc --noEmit -p .` clean。用 Claude in Chrome 真实走一遍浏览器流程：对 cut 57（自定义生成的找不同小游戏）在聊天里发"把倒计时从20秒改成30秒"，确认发送后聊天框立刻出现"已收到，正在自定义游戏调整，请稍候..."，而不是像之前一样空白；等真实的素材重新生成（3张图）、代码重新生成、冒烟测试跑完后，收到"已将 cut 57 自定义小游戏的倒计时从 20 秒调整为 30 秒，新预览已生成"的结果卡片，参考分 100。查库确认新的 `finalRender` 段（id 78）正确替换成选中项，生成的 `game/index.html` 里倒计时确实是 30.0 秒。测试过程中第一次发送撞上了一次不相关的模型/中转临时抖动（`No output generated. The model stream ended without a finish chunk.`，和这次改动无关，模型自己的回复流都没走到工具调用这一步），重新发送后正常走完全程。
+
+---
+
 ## 2026-07-31 修复终审代码级素材检查不认自定义游戏的素材命名，导致自定义游戏永远 0 分卡在"未调用模型审核"
 
 **用户意见 / 触发原因**：用户点击"确认内容，进入终审与落地"后报错——`内容合规：0 · 品牌安全：0 · 技术规格：0`，`产物文件检查未通过，未调用模型审核。游戏包缺少配对素材图: bridgeCut/57/playable/game/assets/tiles/`。排查发现 cut 57 是走"自定义玩法生成"（M9）产出的找不同游戏，实际素材是 `game/assets/custom_0.png`/`custom_1.png`/`custom_2.png`，不在 `tiles/` 目录下；而 `supervisorAgent/index.ts` 的代码级预检查函数 `findTileFileName` 硬编码只认默认翻牌配对的 `game/assets/tiles/tile_src_N.*` 命名，找不到就直接判定"缺素材"，连模型审核都不调用直接返回三个 0 分——这是 M9 加自定义游戏功能时留下的遗漏，终审这一步一直没适配自定义游戏的素材命名约定，此前从未被真实触发过（第一次有自定义游戏真的走到终审这一步）。
