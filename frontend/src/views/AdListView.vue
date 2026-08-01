@@ -20,8 +20,12 @@ const loading = ref(false);
 const creating = ref(false);
 
 const newName = ref("");
-const newAdType = ref<"video" | "image" | "text">("image");
-const newSourceFilePath = ref("");
+// 一次可以勾多种形式（图片+视频+纯文字甚至三个都选）——提交时按选中的每种形式各建一条独立的 ab_ad 记录，
+// 不是把多种内容塞进同一条记录里；后续生成创意方案那一步本来就支持多选素材（ActionBar.vue 的
+// selectedAdIds 数组），拆开建更简单，也不用改 AdLibraryAgent 按单一类型分支的分析管线
+const newAdTypes = ref<("video" | "image" | "text")[]>(["image"]);
+const newImageFilePath = ref("");
+const newVideoFilePath = ref("");
 const newTextContent = ref("");
 const newBrandName = ref("");
 
@@ -44,22 +48,34 @@ async function loadAds() {
   }
 }
 
+const adTypeLabel: Record<"video" | "image" | "text", string> = { image: "图片", video: "视频", text: "纯文字" };
+
 async function handleCreate() {
-  if (!newName.value) return;
+  if (!newName.value || newAdTypes.value.length === 0) return;
+  // 提交前把每种选中形式对应的内容字段都校验一遍，避免建到一半才发现某个形式没填内容，
+  // 前面已经建好的那几条留在列表里、后面的直接报错——用户体感会很奇怪
+  if (newAdTypes.value.includes("image") && !newImageFilePath.value) return MessagePlugin.error("请填写图片文件路径");
+  if (newAdTypes.value.includes("video") && !newVideoFilePath.value) return MessagePlugin.error("请填写视频文件路径");
+  if (newAdTypes.value.includes("text") && !newTextContent.value) return MessagePlugin.error("请填写创意形式内容");
   creating.value = true;
   try {
-    await http.post("/api/ad/createAd", {
-      name: newName.value,
-      adType: newAdType.value,
-      sourceFilePath: newAdType.value === "text" ? undefined : newSourceFilePath.value,
-      textContent: newAdType.value === "text" ? newTextContent.value : undefined,
-      brandName: newBrandName.value || undefined,
-    });
+    // 只选了一种形式时名称保持原样；选了多种时各条名称加上形式后缀，方便在列表里一眼看出这几条是同一次提交拆出来的
+    const multi = newAdTypes.value.length > 1;
+    for (const adType of newAdTypes.value) {
+      await http.post("/api/ad/createAd", {
+        name: multi ? `${newName.value}（${adTypeLabel[adType]}）` : newName.value,
+        adType,
+        sourceFilePath: adType === "image" ? newImageFilePath.value : adType === "video" ? newVideoFilePath.value : undefined,
+        textContent: adType === "text" ? newTextContent.value : undefined,
+        brandName: newBrandName.value || undefined,
+      });
+    }
     newName.value = "";
-    newSourceFilePath.value = "";
+    newImageFilePath.value = "";
+    newVideoFilePath.value = "";
     newTextContent.value = "";
     newBrandName.value = "";
-    MessagePlugin.success("创意素材创建成功");
+    MessagePlugin.success(multi ? `已创建 ${newAdTypes.value.length} 条创意素材` : "创意素材创建成功");
     await loadAds();
   } catch (e: any) {
     MessagePlugin.error(e?.message ?? "创建失败");
@@ -151,18 +167,25 @@ onUnmounted(() => {
       <t-space direction="vertical" style="width: 100%">
         <t-space>
           <t-input v-model="newName" placeholder="名称" />
-          <t-select v-model="newAdType" style="width: 120px">
-            <t-option value="image" label="图片" />
-            <t-option value="video" label="视频" />
-            <t-option value="text" label="纯文字" />
-          </t-select>
+          <t-checkbox-group v-model="newAdTypes">
+            <t-checkbox value="image" label="图片" />
+            <t-checkbox value="video" label="视频" />
+            <t-checkbox value="text" label="纯文字" />
+          </t-checkbox-group>
           <t-input v-model="newBrandName" placeholder="品牌名（可选）" />
         </t-space>
-        <t-space v-if="newAdType !== 'text'">
-          <t-input v-model="newSourceFilePath" placeholder="服务器本地文件路径" style="width: 320px" />
-          <LocalFilePicker @uploaded="(p) => (newSourceFilePath = p)" />
+        <p v-if="newAdTypes.length > 1" style="margin: 0; color: var(--td-text-color-secondary, #666); font-size: 12px">
+          勾了多种形式，提交后会按每种形式各建一条独立的创意素材，名称会加上形式后缀，方便看出是同一次提交拆出来的。
+        </p>
+        <t-space v-if="newAdTypes.includes('image')">
+          <t-input v-model="newImageFilePath" placeholder="图片文件路径" style="width: 320px" />
+          <LocalFilePicker @uploaded="(p) => (newImageFilePath = p)" />
         </t-space>
-        <t-textarea v-else v-model="newTextContent" placeholder="广告文案" />
+        <t-space v-if="newAdTypes.includes('video')">
+          <t-input v-model="newVideoFilePath" placeholder="视频文件路径" style="width: 320px" />
+          <LocalFilePicker @uploaded="(p) => (newVideoFilePath = p)" />
+        </t-space>
+        <t-textarea v-if="newAdTypes.includes('text')" v-model="newTextContent" placeholder="创意形式" />
         <t-button theme="primary" :loading="creating" @click="handleCreate">创建</t-button>
       </t-space>
     </t-card>
@@ -198,7 +221,7 @@ onUnmounted(() => {
         <t-input v-model="editName" placeholder="名称" />
         <t-input v-model="editBrandName" placeholder="品牌名（可选）" />
         <template v-if="editAdType === 'text'">
-          <t-textarea v-model="editTextContent" placeholder="广告文案" />
+          <t-textarea v-model="editTextContent" placeholder="创意形式" />
         </template>
         <template v-else>
           <t-space>
