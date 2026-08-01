@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-07-31 修复终审代码级素材检查不认自定义游戏的素材命名，导致自定义游戏永远 0 分卡在"未调用模型审核"
+
+**用户意见 / 触发原因**：用户点击"确认内容，进入终审与落地"后报错——`内容合规：0 · 品牌安全：0 · 技术规格：0`，`产物文件检查未通过，未调用模型审核。游戏包缺少配对素材图: bridgeCut/57/playable/game/assets/tiles/`。排查发现 cut 57 是走"自定义玩法生成"（M9）产出的找不同游戏，实际素材是 `game/assets/custom_0.png`/`custom_1.png`/`custom_2.png`，不在 `tiles/` 目录下；而 `supervisorAgent/index.ts` 的代码级预检查函数 `findTileFileName` 硬编码只认默认翻牌配对的 `game/assets/tiles/tile_src_N.*` 命名，找不到就直接判定"缺素材"，连模型审核都不调用直接返回三个 0 分——这是 M9 加自定义游戏功能时留下的遗漏，终审这一步一直没适配自定义游戏的素材命名约定，此前从未被真实触发过（第一次有自定义游戏真的走到终审这一步）。
+
+**改了什么**：`src/agents/supervisorAgent/index.ts` 把 `findTileFileName` 换成 `findRepresentativeAssetRelPath`，两种命名约定都认——默认翻牌配对走 `assets/tiles/tile_src_N.*`，自定义游戏走 `assets/` 下直接的 `custom_N.png`。两处调用点都改了：代码级预检查（`codePreCheck`）、给模型审核用的参考图路径解析（`runSupervisionForCut` 里 `imageRelPath` 那段）。
+
+**验证**：`npx tsc --noEmit -p .` clean。重启服务后对 cut 57 真实调用 `runSupervisionForCut(57)`，确认这次正确跳过了代码级拦截、真的调用了模型审核（`contentCompliance=94 / brandSafety=58 / technicalSpec=30`，不再是硬编码三个 0），返回了针对实际内容的具体审核意见（占位 CTA 链接、素材未做成对图、无可测试 H5 成品、演员肖像权确认等）——这些是游戏内容本身还没做完整，和这次修的代码 bug 无关。
+
+---
+
 ## 2026-07-31 新增 Google 官方 Gemini 直连图片模型，替换掉 grsai 中转的 Nano Banana 选项
 
 **用户意见 / 触发原因**：gpt-image-2 中转（napi.moretoken.ai）反复撞上"The origin web server did not return a complete response within the 120-second Proxy Read Timeout window"，用户问"其他的模型比如 gemini 的 image 模型能代替 gpt-image-2 么"，先接了 grsai 中转的 nano-banana-2 作为备选；之后用户在自己的 Google Cloud 项目里申请到了 AI Studio 官方 API Key，要求接一个不经过任何中转的官方直连选项，验证通过之后又明确要求把 grsai 这个选项去掉，只保留 gpt-image-2（中转）和 Google 官方直连两个。
