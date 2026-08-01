@@ -48,7 +48,7 @@ async function handleCreate() {
     newSourceFilePath.value = "";
     newTextContent.value = "";
     newBrandName.value = "";
-    MessagePlugin.success("广告素材创建成功");
+    MessagePlugin.success("创意素材创建成功");
     await loadAds();
   } catch (e: any) {
     MessagePlugin.error(e?.message ?? "创建失败");
@@ -105,7 +105,7 @@ onUnmounted(() => {
 
 <template>
   <div style="padding: 24px; max-width: 960px; margin: 0 auto">
-    <t-card title="新建广告素材" style="margin-bottom: 24px">
+    <t-card title="新建创意素材" style="margin-bottom: 24px">
       <t-space direction="vertical" style="width: 100%">
         <t-space>
           <t-input v-model="newName" placeholder="名称" />
@@ -138,7 +138,7 @@ onUnmounted(() => {
       <template #op="{ row }">
         <t-space>
           <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
-          <t-popconfirm content="确定删除这条广告素材吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
+          <t-popconfirm content="确定删除这条创意素材吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
             <t-button size="small" theme="danger" variant="outline">删除</t-button>
           </t-popconfirm>
         </t-space>
