@@ -31,6 +31,12 @@
 - ✅ **M8** — 真实游戏内容管线：AdLibraryAgent 分析视频广告时顺带挑出真实游戏截图（`tileCandidates`），PlayableAgent 配对小游戏素材优先用这些真实截图（不够才回退 AI 生成），VideoGenAgent 选广告参考图优先用这些已验证的帧，SupervisorAgent 对 `playableGame` 的终审这次真的会看一张实际画面（详见 `docs/milestones/M8.md`）
 - ✅ **M9** — 前端展示精修（删掉 M7 遗留的 ctaCard 死代码）、自定义游戏 revise（`PlayableAgent.reviseCustomGame`，失败时保留原有可玩游戏不动）、Episode/视频/游戏视觉素材传承（StoryboardAgent 新增候选素材 `tileCandidates`，生成游戏素材时让用户勾选这些真实画面作为参考图，游戏组装完成后视频 revise 能回头呼应已生成的真实游戏素材）（详见 `docs/milestones/M9.md`）
 
+M9 之后规划了 M10，目前包含一块：
+
+① **各 Agent 的 prompt 拆分不够干净——`buildXxxMessages` 里混进了本该属于 skill 文件的指令句**。同事 code review 时指出：`buildPlanGenerationMessages` 结尾那句"请针对上面每一条候选广告，各构思一份创意方案（adId 必须严格取自上面列出的广告 id）"是任务指令，不是数据，应该挪进 `director_creative.md`；`buildPlanEvaluationMessages` 结尾"评估结果需要和输入方案顺序一一对应"甚至和 `director_evaluator.md` 结尾那句原样重复，是真实存在的重复隐患（改一处另一处没同步就会不一致）；`buildReviseMessages` 结尾"adId 保持不变，仅调整 narrative / tone"也是通用行为约束，不是这一次调用特有的数据。排查发现 `VideoGenAgent/prompt.ts` 的 `buildStageADraftMessages` 也有同样写法。计划做法：message builder 只负责把结构化数据（Runtime Context Envelope）拼成文本，不掺"请做什么"这类指令，指令性内容全部收进对应的 skill markdown（`data/skills/*.md`）——这样 system prompt 定"要做什么/怎么判断"，message 只放"这次基于什么数据做"，改行为不用碰代码，走已有的 `skillManagement` 管理路由就行。先在 DirectorAgent 验证这个模式（`director_creative.md`/`director_evaluator.md` + 精简 `prompt.ts`），跑通之后再排查是不是其他 agent（VideoGenAgent 已知有这个问题，PlayableAgent/SupervisorAgent 等还没查）也要一起改。
+
+具体实现细节还没有展开，等真正开始做的时候再规划。
+
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
 ## 几条不写在架构文档里、但很重要的约定
