@@ -6,6 +6,7 @@ import * as supervisorAgent from "@/agents/supervisorAgent";
 import * as assembler from "@/agents/assembler";
 import ResTool from "@/socket/resTool";
 import { isValidImageModelKey } from "@/agents/shared/imageModel";
+import { isValidVideoModelKey } from "@/agents/shared/videoModel";
 
 /**
  * 管线里每一步"确认/下一步"动作的共享实现——按钮点击（src/socket/routes/sessionAgent.ts）和
@@ -58,7 +59,13 @@ export async function confirmPlanAction(resTool: ResTool, episodeId: number, pla
 }
 
 /** 为已确认方案生成内容（固定两段式：只生成 video 段草案，playableGame 段留给 assemblePlayableAction） */
-export async function generateContentAction(resTool: ResTool, episodeId: number, creativePlanId: number, imageModelKey?: string): Promise<void> {
+export async function generateContentAction(
+  resTool: ResTool,
+  episodeId: number,
+  creativePlanId: number,
+  imageModelKey?: string,
+  videoModelKey?: string,
+): Promise<void> {
   // 先推一条即时确认消息——分镜草案要跑真实模型调用，不会立刻有结果，
   // 不然确认方案之后界面上什么反应都没有，用户会以为点击没生效
   const ackMsg = resTool.newMessage("assistant");
@@ -67,10 +74,13 @@ export async function generateContentAction(resTool: ResTool, episodeId: number,
   ackMsg.complete();
 
   try {
-    // 用户在内容生成前选的图片模型，落到方案上——后续这份方案下所有分镜草案/游戏素材生成
-    // （包括 revise）都读这一列，不用每次调用各自决定；不选就是走系统默认，不强制
+    // 用户在内容生成前选的图片/视频模型，落到方案上——后续这份方案下所有分镜草案/游戏素材/成片渲染
+    // （包括 revise）都读这两列，不用每次调用各自决定；不选就是走系统默认，不强制
     if (imageModelKey && isValidImageModelKey(imageModelKey)) {
       await u.db("ab_creativePlan").where("id", creativePlanId).update({ imageModelKey });
+    }
+    if (videoModelKey && isValidVideoModelKey(videoModelKey)) {
+      await u.db("ab_creativePlan").where("id", creativePlanId).update({ videoModelKey });
     }
     const cuts = await state.createBridgeCuts(episodeId, creativePlanId);
     const videoCuts = cuts.filter((cut) => cut.type === "video");

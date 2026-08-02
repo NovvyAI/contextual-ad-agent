@@ -148,6 +148,8 @@ export default async (knex: Knex): Promise<void> => {
   // gpt-image-2 中转不稳定，用户可以在内容生成前选一次图片生成模型，选定后这份方案下所有分镜草案/
   // 游戏素材生成（包括后续 revise）都用同一个模型，不用每次调用各自决定；不选就是 null，走系统默认
   await addColumn("ab_creativePlan", "imageModelKey", "text");
+  // 同上——Seedance 中转不稳定时，用户可以改选 Veo 3.1（官方直连，但用参考图会被强制锁定成 8 秒）
+  await addColumn("ab_creativePlan", "videoModelKey", "text");
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，
   // 读取源码跑一遍沙箱拿到 vendor.id/inputValues，写入一行禁用状态的配置。

@@ -9,9 +9,9 @@ import { evaluateDraft, evaluateRender } from "./evaluator";
 import { recordRevise } from "@/agents/shared/reviseHistory";
 import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
 import { resolveImageModelKey } from "@/agents/shared/imageModel";
+import { resolveVideoModelKey } from "@/agents/shared/videoModel";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
-const VIDEO_MODEL_KEY = "imarouter:seedance-2.0";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
 const DEFAULT_DURATION_S = 6;
 
@@ -244,7 +244,8 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const episodeId = plan.episodeId;
 
   const durationS = draft.durationS ?? DEFAULT_DURATION_S;
-  const video = await u.Ai.Video(VIDEO_MODEL_KEY).run(
+  const videoModelKey = await resolveVideoModelKey(creativePlanId);
+  const video = await u.Ai.Video(videoModelKey).run(
     {
       duration: durationS,
       resolution: "1080p",
@@ -267,7 +268,7 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "finalRender").update({ isSelected: 0 });
   await u.db("ab_generatedSegment").insert({
     bridgeCutId,
-    model: VIDEO_MODEL_KEY,
+    model: videoModelKey,
     filePath: relPath,
     state: "done",
     stage: "finalRender",
