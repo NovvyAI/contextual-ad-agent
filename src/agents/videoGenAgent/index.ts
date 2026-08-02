@@ -10,6 +10,7 @@ import { recordRevise } from "@/agents/shared/reviseHistory";
 import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cutLock";
 import { resolveImageModelKey } from "@/agents/shared/imageModel";
 import { resolveVideoModelKey } from "@/agents/shared/videoModel";
+import { resolveVideoResolution } from "@/agents/shared/videoResolution";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
@@ -245,10 +246,11 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
 
   const durationS = draft.durationS ?? DEFAULT_DURATION_S;
   const videoModelKey = await resolveVideoModelKey(creativePlanId);
+  const resolution = await resolveVideoResolution(creativePlanId);
   const video = await u.Ai.Video(videoModelKey).run(
     {
       duration: durationS,
-      resolution: "1080p",
+      resolution,
       aspectRatio: "9:16",
       prompt: assembleStageBPrompt(draft),
       referenceList: [{ type: "image", base64: draftImageBase64, url: draftImageUrl }],

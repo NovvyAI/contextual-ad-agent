@@ -61,7 +61,7 @@ function handleSend(text: string) {
       :ads="ads"
       :busy="store.isGenerating"
       :on-generate-plan="(adIds) => store.generatePlan(adIds)"
-      :on-generate-content="(planId, imageModelKey, videoModelKey) => store.generateBridgeCuts(planId, imageModelKey, videoModelKey)"
+      :on-generate-content="(planId, imageModelKey, videoModelKey, videoResolution) => store.generateBridgeCuts(planId, imageModelKey, videoModelKey, videoResolution)"
       :on-confirm-bridge-cuts="(planId) => store.confirmBridgeCuts(planId)"
       :on-assemble-playable="(planId, selectedCandidateFrames) => store.assemblePlayableCut(planId, selectedCandidateFrames)"
       :on-generate-custom-game="(cutId, description, selectedCandidateFrames) => store.generateCustomGame(cutId, description, selectedCandidateFrames)"
