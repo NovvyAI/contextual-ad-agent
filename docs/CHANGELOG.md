@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-02 成片分辨率也做成用户可选（720p/1080p）
+
+**用户意见 / 触发原因**：用户问 `metadata.resolution` 能不能换成其他值，确认 Seedance 支持 480p/720p/1080p 三档（`data/vendor/imarouter.ts` 的 `durationResolutionMap` 里声明的）、代码里原来硬编码 `"1080p"` 之后，用户要求也做成用户可选。
+
+**改了什么**：新增 `src/agents/shared/videoResolution.ts`（结构照抄 `imageModel.ts`/`videoModel.ts`）：`VIDEO_RESOLUTION_OPTIONS` 只给 **720p/1080p** 两档——这是 Seedance（480p/720p/1080p）和 Veo（720p/1080p/4K）两个视频供应商都支持的交集，不放 480p/4K 这种只有一边支持的档位，避免"选了 Veo 却传 Seedance 独有分辨率"这类无效组合，也不用做"下拉框选项跟着视频模型联动变化"这种更复杂的交互。`ab_creativePlan` 新增 `videoResolution` 列，`performStageBRender` 里原来硬编码的 `resolution: "1080p"` 改成 `await resolveVideoResolution(creativePlanId)`。`generateContentAction`/`bridgeCut:generate` 加 `videoResolution` 参数，`ActionBar.vue` 在图片模型、视频模型两个下拉框之后再加一个分辨率下拉框（默认 1080p，保持原有行为）。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。真实调用 Seedance 传 `resolution: "720p"`，`ffprobe` 确认产物实际是 720×1280（原来固定 1080p 时是 1080×1920），分辨率参数确实生效；另外确认 `resolveVideoResolution` 对老数据（没有这一列的已有方案）正确回退到 1080p，不影响现有行为。验证完清理了测试产物文件。
+
+---
+
 ## 2026-08-02 视频生成模型新增 Veo 3.1 可选项，和图片模型一样支持用户选择
 
 **用户意见 / 触发原因**：Seedance（通过 ImaRouter 中转）反复撞上"疑似真实人物"隐私拦截和网关超时问题，用户问 Google 有没有视频生成模型可以做备选。查了 Veo 3.1（Gemini API 官方直连）的技术细节后，用户明确要求照着图片模型选择的模式，把视频生成模型也做成用户可选——Seedance 和 Veo 3.1（固定8秒）二选一。

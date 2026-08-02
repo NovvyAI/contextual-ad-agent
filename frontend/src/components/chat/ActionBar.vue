@@ -7,7 +7,7 @@ const props = defineProps<{
   ads: { id: number; name: string; summary: string }[];
   busy: boolean;
   onGeneratePlan: (adIds: number[]) => void;
-  onGenerateContent: (creativePlanId: number, imageModelKey: string, videoModelKey: string) => void;
+  onGenerateContent: (creativePlanId: number, imageModelKey: string, videoModelKey: string, videoResolution: string) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
   onAssemblePlayable: (creativePlanId: number, selectedCandidateFrames: string[]) => void;
   onGenerateCustomGame: (bridgeCutId: number, description: string, selectedCandidateFrames: string[]) => void;
@@ -29,6 +29,13 @@ const videoModelOptions = [
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
 ];
 const selectedVideoModelKey = ref(videoModelOptions[0].key);
+// 和后端 src/agents/shared/videoResolution.ts 里的 VIDEO_RESOLUTION_OPTIONS 保持一致——只给两个
+// 视频供应商都支持的档位（720p/1080p），不做成跟着视频模型联动变化的下拉框，简单直接
+const videoResolutionOptions = [
+  { key: "1080p", label: "1080p" },
+  { key: "720p", label: "720p" },
+];
+const selectedVideoResolution = ref(videoResolutionOptions[0].key);
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
 const customGameSelectedFrames = ref<string[]>([]);
@@ -100,7 +107,16 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
         <t-select v-model="selectedVideoModelKey" style="width: 220px" :disabled="busy">
           <t-option v-for="opt in videoModelOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
         </t-select>
-        <t-button theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id, selectedImageModelKey, selectedVideoModelKey)">生成内容</t-button>
+        <t-select v-model="selectedVideoResolution" style="width: 120px" :disabled="busy">
+          <t-option v-for="opt in videoResolutionOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
+        </t-select>
+        <t-button
+          theme="primary"
+          :disabled="busy"
+          @click="onGenerateContent(approvedPlan.id, selectedImageModelKey, selectedVideoModelKey, selectedVideoResolution)"
+        >
+          生成内容
+        </t-button>
       </template>
       <template v-else-if="hasCuts && failedCuts.length">
         <span style="color: var(--td-error-color, #d54941)">{{ failedCuts.length }} 个内容生成失败</span>
