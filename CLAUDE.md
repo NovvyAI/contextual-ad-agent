@@ -31,9 +31,14 @@
 - ✅ **M8** — 真实游戏内容管线：AdLibraryAgent 分析视频广告时顺带挑出真实游戏截图（`tileCandidates`），PlayableAgent 配对小游戏素材优先用这些真实截图（不够才回退 AI 生成），VideoGenAgent 选广告参考图优先用这些已验证的帧，SupervisorAgent 对 `playableGame` 的终审这次真的会看一张实际画面（详见 `docs/milestones/M8.md`）
 - ✅ **M9** — 前端展示精修（删掉 M7 遗留的 ctaCard 死代码）、自定义游戏 revise（`PlayableAgent.reviseCustomGame`，失败时保留原有可玩游戏不动）、Episode/视频/游戏视觉素材传承（StoryboardAgent 新增候选素材 `tileCandidates`，生成游戏素材时让用户勾选这些真实画面作为参考图，游戏组装完成后视频 revise 能回头呼应已生成的真实游戏素材）（详见 `docs/milestones/M9.md`）
 
-M9 之后规划了 M10，目前包含一块：
+M9 之后规划了 M10，目前包含两块：
 
 ① **各 Agent 的 prompt 拆分不够干净——`buildXxxMessages` 里混进了本该属于 skill 文件的指令句**。同事 code review 时指出：`buildPlanGenerationMessages` 结尾那句"请针对上面每一条候选广告，各构思一份创意方案（adId 必须严格取自上面列出的广告 id）"是任务指令，不是数据，应该挪进 `director_creative.md`；`buildPlanEvaluationMessages` 结尾"评估结果需要和输入方案顺序一一对应"甚至和 `director_evaluator.md` 结尾那句原样重复，是真实存在的重复隐患（改一处另一处没同步就会不一致）；`buildReviseMessages` 结尾"adId 保持不变，仅调整 narrative / tone"也是通用行为约束，不是这一次调用特有的数据。排查发现 `VideoGenAgent/prompt.ts` 的 `buildStageADraftMessages` 也有同样写法。计划做法：message builder 只负责把结构化数据（Runtime Context Envelope）拼成文本，不掺"请做什么"这类指令，指令性内容全部收进对应的 skill markdown（`data/skills/*.md`）——这样 system prompt 定"要做什么/怎么判断"，message 只放"这次基于什么数据做"，改行为不用碰代码，走已有的 `skillManagement` 管理路由就行。先在 DirectorAgent 验证这个模式（`director_creative.md`/`director_evaluator.md` + 精简 `prompt.ts`），跑通之后再排查是不是其他 agent（VideoGenAgent 已知有这个问题，PlayableAgent/SupervisorAgent 等还没查）也要一起改。
+
+② **评审的打分维度写死在各自的 Zod schema 里，且四份评审（DirectorAgent 的 PlanEvaluator、VideoGenAgent 的 `evaluateDraft`/`evaluateRender`、PlayableAgent 的 `evaluatePlayable`、SupervisorAgent）代码结构高度重复**。同事进一步指出：评分维度应该支持持续调优、不该写死在代码里；同时应该把评审从 DirectorAgent 里解耦出来，单独设一个 Evaluation Agent。排查确认：`narrativeFeasibility`/`gameRelevance`/`adAlignment`（Plan）、`narrativeContinuity`/`visualConsistency`/...（Video，6 个维度）、`interactionExperience`/`functionalCompleteness`（Playable）都是 Zod schema 里硬编码的字段名，`*_evaluator.md` 只描述"这个字段怎么打分"，维度本身能不能存在完全不受 markdown 控制，不是真的可持续调优；四处实现也几乎是"读 skill 文件→拼待评估内容→`invokeObject`→返回"的同一套代码抄了四遍（`evaluatePlayable` 里也有①同款"指令混进 message"的问题）。计划做法：
+   - 子维度不做成完全动态 schema（会牺牲 `invokeObject` 结构化输出的类型安全），改成通用的 `dimensions: {name, score}[]` 数组——具体有哪些维度、怎么描述，全部交给对应 skill markdown 的 prompt 决定，代码不用关心叫什么名字。这个改法风险低，因为 M2 milestone 早就记录过"子分不落库，只有 overallScore 进数据库、子分和点评只在 socket 消息里临时传一次"，子维度本来就是纯展示、非持久化的。
+   - 抽一个独立的 `src/agents/evaluationAgent/`，提供通用的 `evaluate(skillFile, content) → {dimensions, overallScore, feedback}`，Plan/Video/Playable 三处评审改成调用这个共享实现，各自只传自己的 skill 文件名和待评估内容格式化文本，顺带去掉重复代码。
+   - **明确排除 SupervisorAgent**，不把它并进这个通用 Evaluation Agent——前三者都是"仅供参考、不作为自动拦截依据"，SupervisorAgent 的 `passed: boolean` 是真正的拦截判定（不通过会打回内容环节要求重新生成），性质不同，混在一起会把"建议性打分"和"强制性拦截"这两个语义搅到一起。
 
 具体实现细节还没有展开，等真正开始做的时候再规划。
 
