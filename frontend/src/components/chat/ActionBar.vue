@@ -7,7 +7,7 @@ const props = defineProps<{
   ads: { id: number; name: string; summary: string }[];
   busy: boolean;
   onGeneratePlan: (adIds: number[]) => void;
-  onGenerateContent: (creativePlanId: number, imageModelKey: string) => void;
+  onGenerateContent: (creativePlanId: number, imageModelKey: string, videoModelKey: string) => void;
   onConfirmBridgeCuts: (creativePlanId: number) => void;
   onAssemblePlayable: (creativePlanId: number, selectedCandidateFrames: string[]) => void;
   onGenerateCustomGame: (bridgeCutId: number, description: string, selectedCandidateFrames: string[]) => void;
@@ -23,6 +23,12 @@ const imageModelOptions = [
   { key: "google:gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image（官方直连）" },
 ];
 const selectedImageModelKey = ref(imageModelOptions[0].key);
+// 和后端 src/agents/shared/videoModel.ts 里的 VIDEO_MODEL_OPTIONS 保持一致
+const videoModelOptions = [
+  { key: "imarouter:seedance-2.0", label: "Seedance 2.0" },
+  { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
+];
+const selectedVideoModelKey = ref(videoModelOptions[0].key);
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
 const customGameSelectedFrames = ref<string[]>([]);
@@ -91,7 +97,10 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
         <t-select v-model="selectedImageModelKey" style="width: 220px" :disabled="busy">
           <t-option v-for="opt in imageModelOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
         </t-select>
-        <t-button theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id, selectedImageModelKey)">生成内容</t-button>
+        <t-select v-model="selectedVideoModelKey" style="width: 220px" :disabled="busy">
+          <t-option v-for="opt in videoModelOptions" :key="opt.key" :value="opt.key" :label="opt.label" />
+        </t-select>
+        <t-button theme="primary" :disabled="busy" @click="onGenerateContent(approvedPlan.id, selectedImageModelKey, selectedVideoModelKey)">生成内容</t-button>
       </template>
       <template v-else-if="hasCuts && failedCuts.length">
         <span style="color: var(--td-error-color, #d54941)">{{ failedCuts.length }} 个内容生成失败</span>

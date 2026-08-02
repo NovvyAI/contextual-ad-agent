@@ -81,8 +81,8 @@ function makeSessionAgentStore(episodeId: number) {
     function approvePlan(planId: number) {
       chat.socket.value?.emit("plan:approve", { planId });
     }
-    function generateBridgeCuts(creativePlanId: number, imageModelKey?: string) {
-      chat.socket.value?.emit("bridgeCut:generate", { creativePlanId, imageModelKey });
+    function generateBridgeCuts(creativePlanId: number, imageModelKey?: string, videoModelKey?: string) {
+      chat.socket.value?.emit("bridgeCut:generate", { creativePlanId, imageModelKey, videoModelKey });
     }
     function confirmBridgeCuts(creativePlanId: number) {
       chat.socket.value?.emit("bridgeCut:confirm", { creativePlanId });

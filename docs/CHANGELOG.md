@@ -12,6 +12,24 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-02 视频生成模型新增 Veo 3.1 可选项，和图片模型一样支持用户选择
+
+**用户意见 / 触发原因**：Seedance（通过 ImaRouter 中转）反复撞上"疑似真实人物"隐私拦截和网关超时问题，用户问 Google 有没有视频生成模型可以做备选。查了 Veo 3.1（Gemini API 官方直连）的技术细节后，用户明确要求照着图片模型选择的模式，把视频生成模型也做成用户可选——Seedance 和 Veo 3.1（固定8秒）二选一。
+
+**改了什么**：
+- 新增 `src/agents/shared/videoModel.ts`（结构上完全照抄 `imageModel.ts`）：`VIDEO_MODEL_OPTIONS`（`imarouter:seedance-2.0` / `google:veo-3.1-generate-preview`）+ `resolveVideoModelKey(creativePlanId)`，老数据/没选过的方案回退系统默认（Seedance）。
+- `ab_creativePlan` 新增 `videoModelKey` 列（`fixDB.ts`/`initDB.ts`），和 `imageModelKey` 并列。
+- `data/vendor/google.ts` 新增真正的 Veo 3.1 视频生成实现（原来 `videoRequest` 只是个空字符串占位）：`predictLongRunning` 提交任务 → 轮询 `GET {baseUrl}/{operation.name}` 直到 `done:true` → 从 `response.generateVideoResponse.generatedSamples[0].video.uri` 拿下载地址 → **就地authenticated 下载转 base64 返回**（这一步下载地址本身也需要 `x-goog-api-key`，不是公开直链，不能让上层 `AiVideo.run()` 的自动 `urlToBase64` 无鉴权下载，会 401）。图生视频（我们唯一会用的模式）官方强制固定 8 秒，不管调用方传入的 `durationS` 是多少，如实按 8 秒提交。
+- `videoGenAgent/index.ts` 的 `performStageBRender` 去掉硬编码的 `VIDEO_MODEL_KEY` 常量，改成调 `resolveVideoModelKey(creativePlanId)`；`renderStageB`/`reviseStageBMotion` 都走这个共用函数，自动生效。
+- `generateContentAction`/`bridgeCut:generate` socket 事件加 `videoModelKey` 参数，和 `imageModelKey` 一起落到方案上。
+- `ActionBar.vue`"生成内容"按钮旁在图片模型下拉框之后再加一个视频模型下拉框（默认 Seedance），选定后传给后端。
+
+**踩的坑**：Veo 的 `predictLongRunning` 是 Vertex 风格的 predict 接口，第一次照搬 `imageRequest`（`generateContent` 接口）里的 `inlineData` 字段传参考图，报错"`inlineData` isn't supported by this model"——查证后确认 predict 风格接口的图片字段是 `bytesBase64Encoded` + `mimeType`，不是 `inlineData`，两套接口字段名不通用。改完之后又报"`durationSeconds` needs to be a number"——官方文档给的 REST 示例里这个字段是字符串 `"8"`，实际接口要的是 JSON 数字 `8`，文档示例和真实接口对不上，以真实报错为准。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。真实调用 `u.Ai.Video('google:veo-3.1-generate-preview').run(...)`，用项目自带的 SMPTE 测试图案（`data/test-assets/sample-ad-image.jpg`）当参考图，完整走完提交→轮询→鉴权下载全流程，`ffprobe` 确认产物是合法 MP4（h264+aac，1080×1920，时长精确 8.0 秒），抽帧确认画面是真实生成的动态内容（不是损坏文件）。另外单独验证了 `resolveVideoModelKey` 对老数据（没有 `videoModelKey` 的已有方案）正确回退到 Seedance，不影响现有行为。验证完清理了测试产物文件。
+
+---
+
 ## 2026-08-01 新增 README.md，写清楚本地运行前需要装什么
 
 **用户意见 / 触发原因**：用户问运行这个服务本地需要先装什么软件，要求写进 README。项目之前没有 README，环境要求只零散记在 `CLAUDE.md`（本机环境注意事项）里，没有一份面向"第一次在新机器上跑起来"的清单。
