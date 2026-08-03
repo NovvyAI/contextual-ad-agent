@@ -44,6 +44,13 @@ M9 之后规划了 M10，目前包含两块：
 
 这一节会随进度更新，其余里程碑的详细内容不重复贴在这里，去 `docs/milestones/` 看。
 
+## 已知问题
+
+- **Seedance（ImaRouter 中转）反复触发"疑似真实人物"隐私拦截，根因已查清但暂时无法修，等以后有公网地址再解**。真实报错例子（cut 56/58 都遇到过）：`InputImageSensitiveContentDetected.PrivacyInformation`——"The request failed because the input image 'content[1]' may contain real person"，这个检测发生在 Seedance **真正生成视频**那一步（不是提交阶段），即使参考图是 AI 生成的虚构角色也可能被判定。
+  - **根因**：`data/vendor/imarouter.ts` 的 `videoRequest` 给参考图传 `asset://`（走 `/v1/assets/create` 预审核，官方推荐路径、更不容易触发这个拦截）还是退回 base64 直传（未经审核，更容易被拦），取决于 `isPublicUrl(item.url)` 的判断。而这个 `url` 来自 `u.oss.getFileUrl()`，这台机器 `NODE_ENV` 只有跑在 Electron 里才会变成 `"prod"`（`src/env.ts`），这个项目是普通网页部署不是 Electron 打包，`NODE_ENV` **永远是 `"dev"`**，`.env` 里又没配 `ossURL`，所以 `getFileUrl()` 永远返回 `http://localhost:10588/...`，`isPublicUrl()` 永远判定为 false——代码**永远走 base64 直传，`asset://` 那条本来就写好的路径从来没被真正触发过**。
+  - **为什么现在没法直接修**：查了 ImaRouter 官方 OpenAPI 原始 schema（`AssetCreateRequest`）确认 `/v1/assets/create` 只接受 `url` 字段（必填，"Publicly accessible asset URL"），**没有 base64/文件直传的替代参数**——这台机器是纯本地开发环境，没有公网地址，这条路目前物理上走不通，不是代码没写对。
+  - **怎么解开**：给这台机器一个真正的公网地址（正式部署到有域名/公网 IP 的服务器，或者临时用 ngrok 之类的内网穿透工具），填进 `.env` 的 `ossURL`，`isPublicUrl()` 自然会判定为真，`uploadAssetAndGetReference` 这条已经写好、和官方 schema 完全对得上的代码会自动开始生效，不需要再改代码。评估过用 ngrok 临时验证一次，用户判断目前 Seedance 拦截的频率还能接受，暂不折腾，先记录在这，以后要是拦截变频繁了或者正式部署有了公网地址，直接照上面这条路径解决。
+
 ## 几条不写在架构文档里、但很重要的约定
 
 - **绝不代替用户输入密钥**。API Key、密码这类凭证，任何时候都不应该由 Claude 自己敲进配置/数据库/表单里，哪怕用户主动提供或明确要求，都应该拒绝并解释原因，改成把可执行的命令模板给用户、让用户自己填真实值执行。这条在配置 Claude/Seedance/ImaRouter 的 key 时被反复验证过，不是这个项目特有的规则，但值得记一下。
