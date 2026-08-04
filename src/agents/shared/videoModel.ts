@@ -6,6 +6,9 @@ import u from "@/utils";
  * （没有 6-15 秒自由发挥的空间），选它就是接受这个时长被锁定的取舍，label 里直接写明。
  * Kling v3 Omni 也是走 ImaRouter 中转（和 Seedance 同一个供应商 id，只是 modelName 不同），
  * 官方能力上限只到 720p，没有 1080p，label 里同样直接写明这个取舍。
+ * MiniMax Hailuo 2.3 同样走 ImaRouter 中转，时长官方硬性只有 6/10 两档（不是任意整数），
+ * 选 1080p 时官方还会强制把时长锁定成 6 秒——这两条限制都在 data/vendor/imarouter.ts 里处理，
+ * 这里的 label 只提示"时长档位有限"，不复述具体数字，避免和供应商脚本里的真实约束写重复容易漂移。
  * 用户在内容生成前选一次，选定后写进 ab_creativePlan.videoModelKey，这份方案下所有
  * 分镜成片渲染（包括运镜专用 revise）都读这一列，不用每次调用各自决定。
  */
@@ -13,6 +16,7 @@ export const VIDEO_MODEL_OPTIONS = [
   { key: "imarouter:seedance-2.0", label: "Seedance 2.0" },
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
   { key: "imarouter:kling-v3-omni-video", label: "Kling v3 Omni（ImaRouter 中转，固定 720p）" },
+  { key: "imarouter:MiniMax-Hailuo-2.3", label: "MiniMax Hailuo 2.3（ImaRouter 中转，时长限 6/10 秒）" },
 ] as const;
 
 export type VideoModelKey = (typeof VIDEO_MODEL_OPTIONS)[number]["key"];

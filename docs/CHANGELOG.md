@@ -12,6 +12,19 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-04 新增 MiniMax Hailuo 2.3 作为第四个可选视频模型（走 ImaRouter 中转）
+
+**用户意见 / 触发原因**：用户直接给了 ImaRouter 官方文档链接（`https://doc.imarouter.com/#en/tag/minimax-video/POST/v1/video/generations`），要求先读文档再接入 MiniMax-Hailuo-2.3，吸取了上次 Kling 先拍脑袋实现再返工的教训。
+
+**改了什么**：
+- `curl https://doc.imarouter.com/openapi/en.yaml` 核对原始 spec，发现官方给了两个等价端点：独立的 `POST /v1/video/generations`（`MiniMaxVideoGenerationRequest`，用户链接的那个）和 OpenAI 兼容的 `POST /v1/videos`（`MiniMaxVideosCreateRequest`，文档原话"Actual request path: POST /v1/videos"）——两边字段完全一样。选择用 `/v1/videos` 这条，复用现成的提交/轮询/取结果基础设施，不用再给这个模型单独写一套端点处理逻辑。
+- `data/vendor/imarouter.ts` 的 `videoRequest` 从"Kling 特判"重构成 `vendorFamily()`（seedance/kling/minimax 三选一）的通用分支结构，新增 MiniMax 分支：请求体是 `model/prompt/duration/size/metadata.first_frame_image`（`additionalProperties:false`，没有 Seedance 的 `metadata.resolution`、没有 Kling 的 `mode`/`sound`）。这个模型有两条 Seedance/Kling 都没有的限制：① 时长官方硬性只有 6/10 两档；② `size=1080p` 时官方强制 `duration` 只能是 6——这条"分辨率决定时长档位"的联动约束用不了原来只按单一维度 clamp 的 `clampToAllowed`/`clampResolution`，单独处理（`duration` 从 `const` 改成 `let`，方便在 minimax 分支里被 1080p 这条约束覆盖）。我们系统的 720p 设置映射到 MiniMax 最接近的 768p 档位（MiniMax 没有字面量 720p）。参考图字段和 Kling 一样只认公网 url、不接受 base64——复用了给 Kling 已经写好的"没有公网 url 就提前报错"逻辑（`PUBLIC_URL_ONLY_FAMILIES` 现在包含 kling 和 minimax 两家）。
+- `src/agents/shared/videoModel.ts` 的 `VIDEO_MODEL_OPTIONS` 新增 `imarouter:MiniMax-Hailuo-2.3`；`frontend/src/components/chat/ActionBar.vue` 同步更新。
+
+**验证**：`npx tsc --noEmit -p .`、独立类型检查 `data/vendor/imarouter.ts`、`npx vue-tsc -b --force` 均 clean。通过 `u.Ai.Video("imarouter:MiniMax-Hailuo-2.3")` 这条和生产完全一样的调用路径，用真实公网 url（`ensurePublicImageUrl()` 传到 GCS）跑了一次完整视频生成：请求 `duration=10, resolution=720p`，正确映射成 `size=768p`（不是 1080p，所以没有触发"强制 6 秒"这条约束），成片 `ffprobe` 确认 768 宽、约 10.1 秒，画面确认是真实生成的运镜内容（不是静态复读）。测试产物（本地视频、GCS 临时对象、脚本）已清理。
+
+---
+
 ## 2026-08-04 Seedance/Kling 参考图统一走 GCS 中转拿公网 url，不再依赖 ossURL/NODE_ENV
 
 **用户意见 / 触发原因**：上一条修复只是让 Kling 在没有公网 url 时提前报清楚的错，没有真正解决问题。用户接着问"如何让这个图片变成公网可访问"，一起排查发现光配 `.env` 的 `ossURL` 不够——`src/utils/oss.ts` 的 `getFileUrl()` 里 `NODE_ENV=="dev"` 的判断写在 `ossURL` 判断后面，只要 `NODE_ENV` 还是 `"dev"`（本机开发环境一直是）就会无条件覆盖回 localhost。用户提出直接把图片传到 GCP 上换一个公网地址，登录 `gcloud` 后确认 `novvy-dev` 这个项目下已经有一个现成的公开桶 `novvy-seedance-public`（`allUsers:objectViewer`），手动上传验证 Kling 真实调用能跑通之后，要求把这条路径做成 Seedance/Kling 都走的正式流程。
