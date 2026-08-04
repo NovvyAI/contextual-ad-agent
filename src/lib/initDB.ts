@@ -279,6 +279,22 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("createTime");
       },
     },
+    // 聊天记录持久化——原来聊天面板全靠 socket 实时事件在前端内存里拼出来，刷新页面/断线重连
+    // 就什么历史都没有了（底层方案/cut 数据没丢，只是"看得见的过程记录"没了）。这里存的是原始协议
+    // 事件（message/message:update/content:add/content:update 四种，和 resTool.ts 发给前端的
+    // 事件完全一一对应），不是加工过的最终消息状态——前端加载历史时按 id 顺序把这些事件重放一遍，
+    // 复用和处理实时 socket 事件完全相同的那套 reducer 逻辑（useChat.ts），不用另外维护一套
+    // 拼装规则，两边天然不会走出两个不同的结果。
+    {
+      name: "ab_chatEvent",
+      builder: (table) => {
+        table.increments("id");
+        table.integer("episodeId").unsigned().references("id").inTable("ab_episode");
+        table.text("eventType"); // message | message:update | content:add | content:update
+        table.text("payload"); // JSON.stringify 之后的原始事件 payload，和 socket.emit 发给前端的一模一样
+        table.integer("createTime");
+      },
+    },
   ];
 
   for (const t of tables) {

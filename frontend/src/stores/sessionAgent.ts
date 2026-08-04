@@ -70,6 +70,12 @@ function makeSessionAgentStore(episodeId: number) {
       try {
         const res = (await http.post("/api/episode/getSessionState", { episodeId })) as any;
         sessionState.value = res.data;
+        // 只在聊天面板还是空的时候回放历史——loadSessionState 之后还会在别的时机被重新调用
+        // （比如每次助手消息生成完），那些时候 messages 已经有实时消息了，不能再回放一遍历史，
+        // 否则会把已经在看的实时消息前面重复插入一遍
+        if (chat.messages.value.length === 0 && res.data.chatEvents?.length) {
+          chat.hydrateHistory(res.data.chatEvents);
+        }
       } finally {
         loadingSessionState.value = false;
       }

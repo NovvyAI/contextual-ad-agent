@@ -12,6 +12,25 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-03 聊天记录持久化——刷新页面/断线重连不再丢失整个对话历史
+
+**用户意见 / 触发原因**：用户反馈选了 Veo 视频模型后一直卡在"已确认全部分镜草案，开始渲染成片"没反应。排查发现后端其实早就渲染成功了（真实视频文件都在），是这次生成耗时较长、期间浏览器标签页的 socket 实时推送没收到（实时消息是一次性的，不会补发），导致界面停在旧状态。建议用户刷新页面后，用户又反馈"前面的方案、分镜草案什么都没有了"——查证方案/cut 底层数据完全没丢（`getSessionState` 返回的结构化状态正确，ActionBar 已经能正确显示"确认组装小游戏"按钮），丢的只是聊天面板里的"过程记录"：这个项目从一开始聊天消息就完全没有持久化，全靠 socket 实时事件在前端内存里现拼，刷新等于开一个全新会话。用户确认要做持久化，并确认可以直接复用现有的"删除 Episode"按钮级联清理，不需要单独的"清空聊天记录"功能。
+
+**改了什么**：不是在服务端重新拼装一份"消息最终状态"（会和前端处理实时事件的 reducer 逻辑变成两套独立实现，容易走出不一致的结果），而是把 `resTool.ts` 发给前端的四类原始协议事件（`message`/`message:update`/`content:add`/`content:update`）原样存进新表 `ab_chatEvent`，前端加载历史时按落库顺序把这些事件重放一遍，复用和处理实时事件完全相同的 handler，两条路径永远拼出一样的结果。
+
+- `src/socket/persistingSocket.ts`（新增）：`resTool.ts` 里几十个 `this.socket.emit(...)` 调用点不用逐个改——给传进 `ResTool` 构造函数的 socket 包一层，只实现 `emit` 方法（`resTool.ts` 也只用到这一个方法），先把这四类事件异步落库（fire-and-forget，失败只打日志不影响实时推送），再转发给真实 socket。只在 `src/socket/routes/sessionAgent.ts` 一处接线（`new ResTool(wrapSocketForPersistence(socket, episodeId), ...)`）。
+- 用户在聊天框自己打的话，之前完全没经过 `resTool`（前端本地直接拼进 `messages` 数组，从来没 emit 过 `message` 事件）——在 `socket.on("chat", ...)` 里单独补一条落库（只存不 emit，避免实时场景下重复气泡）。
+- `getSessionState` 新增 `chatEvents` 字段，按 `episodeId` 查 `ab_chatEvent`（按 id 排序）返回。
+- `frontend/src/composables/useChat.ts`：把处理 `message`/`message:update`/`content:add` 的三个匿名回调提成命名函数（`content:update` 本来就是命名函数），新增 `hydrateHistory(events)`，按顺序把历史事件喂给这几个函数；回放完如果最后一条消息还卡在 pending/streaming（服务器上次重启导致没走到 complete），主动标成 error，不然 `isGenerating` 会一直读到假的"生成中"状态。
+- `stores/sessionAgent.ts` 的 `loadSessionState` 里调用 `hydrateHistory`（只在 `messages` 还是空的时候回放，避免这个函数后续被其他时机重新调用时重复插入历史）；`SessionView.vue` 的 `onMounted` 把"拉 session 状态"和"连 socket"从并行改成顺序执行（先回放完历史，再连 socket），不然刚连上就可能到来的实时事件会和历史回放交错。
+- `deleteEpisode.ts` 级联删除加一行 `ab_chatEvent`，避免删 Episode 之后留下孤儿聊天记录。
+
+**踩的坑**：验证过程中先后遇到两次"刷新后消息没了"的假阳性——第一次是 `navigate()` 到和当前完全相同的 URL，浏览器不触发真实的页面重载，实际测的是没刷新过的旧内存状态；第二次是排查这个问题时，顺带发现 `start_server.sh` 的清理逻辑本身有 bug：`pkill -f "tsx src/app.ts"` 只能命中 `nodemon → tsx 包装层` 这一层的命令行，最内层真正监听端口的 `node --require .../preflight.cjs ... src/app.ts` 进程命令行里根本不带 "tsx" 这个词，一直杀不掉，导致新旧两套完整的前后端同时跑、互相看不见对方的最新代码——这也是这个项目里之前多次遇到"改了代码但看起来没生效"的一个潜在根因。把匹配串改成只用 `"src/app.ts"`（两处都改）之后，重新用 `location.reload(true)` 强制硬刷新验证，历史消息才真正、可靠地复现了出来。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。清理干净所有残留进程后重新走一遍：发一条消息（收到即时确认+助手回复）→ 查库确认 `ab_chatEvent` 正确记录了 16 条事件 → `location.reload(true)` 强制硬刷新 → 消息原样复现，顺序和内容和刷新前完全一致 → 再发一条新消息，正常收到回复，历史消息和新消息共存不重复不丢失，确认实时功能没受影响。验证完清理了测试产生的 `ab_chatEvent` 数据。
+
+---
+
 ## 2026-08-03 候选帧选择优先保证每个主要角色都有清晰画面，供游戏素材生成时当人物形象参考
 
 **用户意见 / 触发原因**：用户问有没有办法把 Episode 里各个角色的形象传给游戏 agent。排查发现游戏 agent 的文字上下文（`playableAgent`/`customGamePrompt` 的 `formatContext`）从来没带过 `episodeAnalysis.characters`，图片方面用户虽然可以勾选 Episode 候选帧当参考图，但候选帧本身是"清晰展示主要角色**或**有代表性场景"的笼统池子，不保证每个角色都被覆盖到。用户明确表示不需要"哪张图对应哪个角色"这种精确标注，只需要候选池子里确实有各个角色的清晰画面即可——不用做角色-帧关联的数据结构，只需要把候选帧选择本身选得更准。

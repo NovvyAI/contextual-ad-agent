@@ -64,6 +64,11 @@ export default router.post(
       );
     }
 
+    // 聊天记录持久化——按落库顺序原样把这些协议事件交给前端，前端用和处理实时 socket 事件完全
+    // 相同的 reducer 重放一遍，重建出聊天面板该有的样子（不在这里加工，加工逻辑只在前端维护一份）
+    const chatEventRows = await u.db("ab_chatEvent").where("episodeId", episodeId).orderBy("id");
+    const chatEvents = chatEventRows.map((row: any) => ({ eventType: row.eventType, payload: JSON.parse(row.payload) }));
+
     const manifestRow = await u.db("ab_manifest").where("episodeId", episodeId).orderBy("createTime", "desc").first();
     let manifest: { id: number; type: string; deliverableUrl: string; ctaUrl?: string } | null = null;
     if (manifestRow?.manifestJson && manifestRow.id != null) {
@@ -90,6 +95,7 @@ export default router.post(
         creativePlans,
         bridgeCuts,
         manifest,
+        chatEvents,
       }),
     );
   },

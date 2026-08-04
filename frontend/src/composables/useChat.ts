@@ -151,77 +151,83 @@ export function useChat(options: UseChatOptions) {
     if (idx > -1) messages.value.splice(idx, 1);
   };
 
+  // 下面四个 handleXxx 是处理 message/message:update/content:add/content:update 四类协议事件的
+  // reducer，既用来处理实时 socket 事件，也用来重放历史（hydrateHistory）——两条路径必须是同一份
+  // 逻辑，不然聊天记录持久化重建出来的样子会和当时实时看到的不一致。
+  const handleMessage = (data: MessageEvent) => {
+    const newMessage: ChatMessagesData = {
+      id: data.id,
+      role: data.role,
+      name: data.name,
+      status: data.status || "pending",
+      datetime: data.datetime,
+      content: data.content || [],
+      ext: data.ext,
+    } as ChatMessagesData;
+
+    if (newMessage.status === "complete" && isEmptyMessageContent(newMessage)) return;
+
+    messages.value.push(newMessage);
+
+    if (data.role === "assistant") {
+      currentMessageId.value = data.id;
+      status.value = data.status === "streaming" ? "streaming" : "pending";
+    }
+  };
+
+  const handleMessageUpdate = (data: MessageUpdateEvent) => {
+    const msg = findMessage(data.id);
+    if (!msg) return;
+    if (data.status) msg.status = data.status;
+    if (data.ext) msg.ext = { ...msg.ext, ...data.ext };
+
+    if (data.status === "complete" && isEmptyMessageContent(msg)) {
+      removeMessage(data.id);
+      if (currentMessageId.value === data.id) {
+        currentMessageId.value = null;
+        status.value = "idle";
+      }
+      return;
+    }
+
+    if (data.status === "streaming") status.value = "streaming";
+
+    if (data.status === "complete" || data.status === "error" || data.status === "stop") {
+      if (currentMessageId.value === data.id) {
+        currentMessageId.value = null;
+        status.value = "idle";
+      }
+    }
+  };
+
+  const handleContentAdd = (data: ContentAddEvent) => {
+    const msg = findMessage(data.messageId) as AIMessage;
+    if (!msg || msg.role !== "assistant") return;
+    if (!msg.content) msg.content = [];
+
+    const content = {
+      ...data.content,
+      status: data.content.status || "pending",
+      ...(data.content.type === "thinking" ? { ext: { collapsed: true, ...data.content.ext } } : {}),
+    };
+
+    if (content.type === "thinking") {
+      const firstNonThinkingIndex = msg.content.findIndex((c: any) => c.type !== "thinking");
+      if (firstNonThinkingIndex === -1) msg.content.push(content);
+      else msg.content.splice(firstNonThinkingIndex, 0, content);
+    } else {
+      msg.content.push(content);
+    }
+
+    if (content.status === "streaming" && msg.status === "pending") msg.status = "streaming";
+  };
+
   const setupHandlers = () => {
     if (!socket.value) return;
 
-    socket.value.on("message", (data: MessageEvent) => {
-      const newMessage: ChatMessagesData = {
-        id: data.id,
-        role: data.role,
-        name: data.name,
-        status: data.status || "pending",
-        datetime: data.datetime,
-        content: data.content || [],
-        ext: data.ext,
-      } as ChatMessagesData;
-
-      if (newMessage.status === "complete" && isEmptyMessageContent(newMessage)) return;
-
-      messages.value.push(newMessage);
-
-      if (data.role === "assistant") {
-        currentMessageId.value = data.id;
-        status.value = data.status === "streaming" ? "streaming" : "pending";
-      }
-    });
-
-    socket.value.on("message:update", (data: MessageUpdateEvent) => {
-      const msg = findMessage(data.id);
-      if (!msg) return;
-      if (data.status) msg.status = data.status;
-      if (data.ext) msg.ext = { ...msg.ext, ...data.ext };
-
-      if (data.status === "complete" && isEmptyMessageContent(msg)) {
-        removeMessage(data.id);
-        if (currentMessageId.value === data.id) {
-          currentMessageId.value = null;
-          status.value = "idle";
-        }
-        return;
-      }
-
-      if (data.status === "streaming") status.value = "streaming";
-
-      if (data.status === "complete" || data.status === "error" || data.status === "stop") {
-        if (currentMessageId.value === data.id) {
-          currentMessageId.value = null;
-          status.value = "idle";
-        }
-      }
-    });
-
-    socket.value.on("content:add", (data: ContentAddEvent) => {
-      const msg = findMessage(data.messageId) as AIMessage;
-      if (!msg || msg.role !== "assistant") return;
-      if (!msg.content) msg.content = [];
-
-      const content = {
-        ...data.content,
-        status: data.content.status || "pending",
-        ...(data.content.type === "thinking" ? { ext: { collapsed: true, ...data.content.ext } } : {}),
-      };
-
-      if (content.type === "thinking") {
-        const firstNonThinkingIndex = msg.content.findIndex((c: any) => c.type !== "thinking");
-        if (firstNonThinkingIndex === -1) msg.content.push(content);
-        else msg.content.splice(firstNonThinkingIndex, 0, content);
-      } else {
-        msg.content.push(content);
-      }
-
-      if (content.status === "streaming" && msg.status === "pending") msg.status = "streaming";
-    });
-
+    socket.value.on("message", handleMessage);
+    socket.value.on("message:update", handleMessageUpdate);
+    socket.value.on("content:add", handleContentAdd);
     socket.value.on("content:update", handleContentUpdate);
 
     socket.value.on("connect", () => {
@@ -309,6 +315,43 @@ export function useChat(options: UseChatOptions) {
     status.value = "idle";
   };
 
+  /**
+   * 用持久化的历史事件重建聊天面板——按落库顺序把 message/message:update/content:add/content:update
+   * 四类事件喂给和处理实时事件完全相同的 handler，不用另外维护一套"最终状态长什么样"的拼装规则。
+   * 必须在 connect() 之前调用（页面加载时先拉历史、回放完再连 socket），不然历史回放和刚连上就可能
+   * 到来的实时事件会交错，顺序就乱了。
+   */
+  const hydrateHistory = (events: { eventType: string; payload: any }[]) => {
+    for (const event of events) {
+      switch (event.eventType) {
+        case "message":
+          handleMessage(event.payload as MessageEvent);
+          break;
+        case "message:update":
+          handleMessageUpdate(event.payload as MessageUpdateEvent);
+          break;
+        case "content:add":
+          handleContentAdd(event.payload as ContentAddEvent);
+          break;
+        case "content:update":
+          handleContentUpdate(event.payload as ContentUpdateEvent);
+          break;
+      }
+    }
+
+    // 回放完之后最后一条消息如果还卡在 pending/streaming，说明上次生成中途服务器重启/异常退出了，
+    // 从来没有真正 complete/error 过——不主动纠正的话 isGenerating 会一直读到这个假的"生成中"状态，
+    // 界面会显示"停止"按钮，但背后根本没有真实请求在跑
+    const lastMsg = messages.value[messages.value.length - 1];
+    if (lastMsg && lastMsg.role === "assistant" && (lastMsg.status === "pending" || lastMsg.status === "streaming")) {
+      lastMsg.status = "error";
+      (lastMsg as any).ext = { ...(lastMsg as any).ext, error: "连接中断，未能生成完整回复" };
+    }
+
+    currentMessageId.value = null;
+    status.value = "idle";
+  };
+
   if (manageLifecycle) {
     onMounted(() => {
       if (autoConnect) connect();
@@ -339,6 +382,7 @@ export function useChat(options: UseChatOptions) {
     clearMessages,
     removeMessage,
     findMessage,
+    hydrateHistory,
   };
 }
 

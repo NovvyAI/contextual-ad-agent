@@ -11,8 +11,13 @@ cd "$ROOT_DIR"
 BACKEND_LOG="$ROOT_DIR/backend.log"
 FRONTEND_LOG="$ROOT_DIR/frontend.log"
 
-# 先清理可能残留的旧进程，避免端口被占用导致启动失败（nodemon/vite 异常退出时偶尔会有残留）
-pkill -f "tsx src/app.ts" >/dev/null 2>&1 || true
+# 先清理可能残留的旧进程，避免端口被占用导致启动失败（nodemon/vite 异常退出时偶尔会有残留）。
+# 匹配串只用 "src/app.ts"，不要加 "tsx" 前缀——nodemon → tsx 包装层 → 真正跑起来持有端口的那个
+# node 进程，三层命令行长得都不一样（中间层是 "tsx --inspect src/app.ts"，最内层是
+# "node --require .../tsx/dist/preflight.cjs ... --inspect src/app.ts"，压根不带 "tsx" 这个词），
+# 之前用 "tsx src/app.ts" 只能命中中间层，最内层杀不掉，端口还占着，下次启动直接 EADDRINUSE，
+# 还会造成两套完整的前后端同时跑、互相看不见对方状态这种更隐蔽的问题。
+pkill -f "src/app.ts" >/dev/null 2>&1 || true
 pkill -f "frontend/node_modules/.bin/vite" >/dev/null 2>&1 || true
 sleep 1
 
@@ -26,7 +31,7 @@ cleanup() {
   done
   # yarn/vite 包起来的子进程不一定会跟着上面这个 kill 一起退出（yarn 不一定把信号转发给它拉起的
   # 实际进程），兜底按命令特征再杀一遍，不然脚本退出后端口还占着，下次启动会报 EADDRINUSE
-  pkill -f "tsx src/app.ts" >/dev/null 2>&1 || true
+  pkill -f "src/app.ts" >/dev/null 2>&1 || true
   pkill -f "frontend/node_modules/.bin/vite" >/dev/null 2>&1 || true
   wait >/dev/null 2>&1 || true
   echo "已停止。"

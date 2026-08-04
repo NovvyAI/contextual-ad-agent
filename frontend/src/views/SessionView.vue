@@ -30,8 +30,9 @@ watch(
 );
 
 onMounted(async () => {
-  store.value.connect();
-  await Promise.all([store.value.loadSessionState(), loadAds()]);
+  // loadSessionState 内部会把持久化的聊天历史回放进 messages，必须先跑完再连 socket——
+  // 不然刚连上就可能到来的实时事件会和历史回放交错，顺序就乱了
+  await Promise.all([store.value.loadSessionState().then(() => store.value.connect()), loadAds()]);
 });
 
 onUnmounted(() => {
