@@ -27,6 +27,7 @@ const selectedImageModelKey = ref(imageModelOptions[0].key);
 const videoModelOptions = [
   { key: "imarouter:seedance-2.0", label: "Seedance 2.0" },
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
+  { key: "imarouter:kling-v3-omni-video", label: "Kling v3 Omni（ImaRouter 中转，固定 720p）" },
 ];
 const selectedVideoModelKey = ref(videoModelOptions[0].key);
 // 和后端 src/agents/shared/videoResolution.ts 里的 VIDEO_RESOLUTION_OPTIONS 保持一致——只给两个

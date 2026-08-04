@@ -11,6 +11,7 @@ import { acquireCutLock, releaseCutLock, cutBusyError } from "@/agents/shared/cu
 import { resolveImageModelKey } from "@/agents/shared/imageModel";
 import { resolveVideoModelKey } from "@/agents/shared/videoModel";
 import { resolveVideoResolution } from "@/agents/shared/videoResolution";
+import { ensurePublicImageUrl } from "@/agents/shared/publicImageUrl";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
@@ -248,10 +249,6 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const draftSegment = await u.db("ab_generatedSegment").where("bridgeCutId", bridgeCutId).where("stage", "draftImage").where("isSelected", 1).first();
   if (!draftSegment?.filePath) throw new Error(`Cut ${bridgeCutId} 没有已选定的草案图`);
   const draftImageBase64 = (await u.oss.getFile(draftSegment.filePath)).toString("base64");
-  // 带上真实可公网访问的 url（生产环境配了 ossURL 才是真的公网地址，本机 dev 环境是 localhost，
-  // 供应商脚本自己会判断是不是本地地址，本地地址就还是退回 base64 直传）——
-  // Seedance 的人物素材合规审核走 /v1/assets/create 只认公网 url，不接受 base64 临时直链
-  const draftImageUrl = await u.oss.getFileUrl(draftSegment.filePath);
   const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
   if (plan?.episodeId == null) throw new Error(`Cut ${bridgeCutId} 反查不到 episodeId`);
   const episodeId = plan.episodeId;
@@ -259,6 +256,16 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const durationS = draft.durationS ?? DEFAULT_DURATION_S;
   const videoModelKey = await resolveVideoModelKey(creativePlanId);
   const resolution = await resolveVideoResolution(creativePlanId);
+
+  // 带上真实可公网访问的 url——Seedance 的人物素材合规审核走 /v1/assets/create 只认公网 url，
+  // Kling 的 image 字段更严格，只接受公网 url、不接受 base64（真实验证过，见 CLAUDE.md 已知问题）。
+  // 只有走 ImaRouter 中转的模型（Seedance/Kling）才需要这个；Veo 直接吃 bytesBase64Encoded，
+  // 不需要 url，白跑一次 GCS 上传（真实网络往返）没有意义。ensurePublicImageUrl() 内部已经会先
+  // 判断 u.oss.getFileUrl() 是不是已经是公网地址（生产环境配了 ossURL 的话），只有还是 localhost
+  // 时才会真的传一次 GCS。
+  const draftImageUrl = videoModelKey.startsWith("imarouter:")
+    ? await ensurePublicImageUrl(draftSegment.filePath)
+    : await u.oss.getFileUrl(draftSegment.filePath);
   const video = await u.Ai.Video(videoModelKey).run(
     {
       duration: durationS,

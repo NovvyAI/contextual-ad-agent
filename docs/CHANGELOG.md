@@ -12,6 +12,46 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-04 Seedance/Kling 参考图统一走 GCS 中转拿公网 url，不再依赖 ossURL/NODE_ENV
+
+**用户意见 / 触发原因**：上一条修复只是让 Kling 在没有公网 url 时提前报清楚的错，没有真正解决问题。用户接着问"如何让这个图片变成公网可访问"，一起排查发现光配 `.env` 的 `ossURL` 不够——`src/utils/oss.ts` 的 `getFileUrl()` 里 `NODE_ENV=="dev"` 的判断写在 `ossURL` 判断后面，只要 `NODE_ENV` 还是 `"dev"`（本机开发环境一直是）就会无条件覆盖回 localhost。用户提出直接把图片传到 GCP 上换一个公网地址，登录 `gcloud` 后确认 `novvy-dev` 这个项目下已经有一个现成的公开桶 `novvy-seedance-public`（`allUsers:objectViewer`），手动上传验证 Kling 真实调用能跑通之后，要求把这条路径做成 Seedance/Kling 都走的正式流程。
+
+**改了什么**：
+- 新增 `src/agents/shared/publicImageUrl.ts` 的 `ensurePublicImageUrl(relPath)`：先看 `u.oss.getFileUrl()` 是不是已经是公网地址（真部署配了 `ossURL` 的话），不是的话把文件传到 `novvy-seedance-public` 桶（`gcloud storage cp`，复用本机已登录的 `gcloud` CLI 身份，没有另外装 `@google-cloud/storage` SDK 或配 Application Default Credentials），换一个真实公网直链返回。
+- `src/agents/videoGenAgent/index.ts` 的 `performStageBRender`：`videoModelKey` 以 `imarouter:` 开头（Seedance/Kling）时才调用这个函数换公网 url；Veo 直接吃 base64 不需要 url，跳过这次上传（省一次真实网络往返）。
+- `data/vendor/imarouter.ts` 上一条改动加的"Kling 没有公网 url 就提前报错"这条防御性检查保留不动，作为 `ensurePublicImageUrl()` 万一出问题（比如这台机器没装/没登录 `gcloud`）时的最后一道防线，不会退回去发一个必然崩的 base64 请求。
+
+**验证**：`npx tsc --noEmit -p .` clean。分两步真实验证：① 单独测 `ensurePublicImageUrl()`——真实执行 `gcloud storage cp` 上传 cut 76 的草案图，返回的 `https://storage.googleapis.com/novvy-seedance-public/contextual-ad-agent/bridgeCut/76/draft-...png` 用 `curl` 确认 HTTP 200、字节数和原图完全一致；② 通过 `u.Ai.Video("imarouter:kling-v3-omni-video")` 这条和生产完全一样的调用路径，用这个真实公网 url 跑了一次完整视频生成，成功产出真实 720×1280、约 10 秒的视频（`ffprobe` 确认），画面内容也肉眼确认是真实生成的（参考图里的中文字保留清晰，不是幻觉乱码）。测试过程中用到的 GCS 测试对象和本地临时文件已清理。
+
+---
+
+## 2026-08-04 修复 Kling 参考图传 base64 会把 ImaRouter 后端 wget 干爆的问题
+
+**用户意见 / 触发原因**：Kling v3 Omni 刚接入就被真实用了一次——用户选了这个模型生成成片，报错 cut 76（成片渲染）失败：`视频生成失败: failed — wget download failed: fork/exec /usr/bin/wget: argument list too long`，看着报错完全不知道是什么意思。
+
+**改了什么**：排查确认这台机器是本机 dev 环境，没有公网地址（`.env` 没配 `ossURL`），Stage A 草案图的 `url` 只能是 `http://localhost:10588/...`，`isPublicUrl()` 判定为 false，于是走了 Kling 分支里"没有公网 url 就退回 base64"这条路——但 Kling 这条路由和 Seedance 不一样，`image` 字段**真实验证过完全不接受 base64**：传了之后 ImaRouter 后端直接拿这段几百 KB 的 base64 字符串去 `wget` 下载，命令行参数长度爆掉，报的就是这个"argument list too long"，报错本身完全看不出根因是"没有公网地址"。这和已经记录过的 Seedance 隐私拦截是同一个根因（本机永远没有公网 `ossURL`），只是 Kling 这边没有 Seedance 那种"好歹能跑通、只是有隐私拦截风险"的后备选项，是硬性失败。`data/vendor/imarouter.ts` 的 `videoRequest` 里给 Kling 分支加了前置判断：没有公网 url 时直接抛出"Kling v3 Omni 只接受公网可访问的图片 URL，不支持 base64 直传"这类看得懂的错误，不再把注定失败的请求真的发出去。同步把这个已知问题记进了 `CLAUDE.md`。
+
+**验证**：`npx tsc --noEmit -p .`、独立类型检查 `data/vendor/imarouter.ts` 均 clean。检查 cut 76 当前数据库状态：`status="failed"`，`ab_generatedSegment` 里只有 Stage A 的草案图，没有 finalRender 产物——这次失败发生在拿到最终视频之前，没有真实数据需要恢复。这个模型在本机环境下要等真的配了公网 `ossURL` 才能实际用起来（跟 Seedance 的 asset:// 是同一个卡点），暂时没法验证提前报错之后的实际使用体验。
+
+---
+
+## 2026-08-04 新增 Kling v3 Omni 作为第三个可选视频模型（走 ImaRouter 中转）
+
+**用户意见 / 触发原因**：聊天里问了一圈 Kling 各个模型的区别（`data/vendor/klingai.ts` 是脚手架自带、这个项目一直没接入的供应商模板），用户决定把其中的 `kling-v3-omni-video` 也加进视频模型可选列表，走 ImaRouter 中转（不是 `klingai.ts` 那条直连 Access Key/Secret Key 的路径，是和 Seedance 同一个 ImaRouter 供应商、只是换一个 `modelName`）。第一版实现是照 Kling 官方直连（klingai.ts）的能力表拍脑袋写的请求体，用户随后甩了一个 ImaRouter 中转站自己的接口文档链接（`https://doc.imarouter.com/#en/tag/kling-video/POST/v1/videos#kling-v3-omni-video`）过来，一查发现请求 schema 和猜的不一样，返工重写。
+
+**改了什么**：
+- 用 `curl https://doc.imarouter.com/openapi/en.yaml` 拿到原始 OpenAPI spec 核对 `KlingV3OmniVideoCreateRequest` 这个 schema（WebFetch 对这类 SPA 文档站不可靠，这个项目已经不是第一次靠这个办法查真实接口契约了）。确认这个模型的请求体和 Seedance **完全不是同一套契约**，虽然共用同一个 `/v1/videos` 端点：
+  - `additionalProperties: false`——第一版代码不管什么模型都无条件塞一个 `metadata: { resolution }`，Kling 的 schema 根本没有 `metadata` 字段，这个请求原样发出去会被 400 拒绝。
+  - 没有 `resolution` 参数——画质档位靠 `mode`（`std`/`pro`，默认 `std`）控制，不是传分辨率数值。
+  - 参考图字段是 `image`/`images`/`image_list`，官方声明是 `format: uri`，完全没提到 Seedance 那套 `asset://` 素材审核协议。
+  - 还有 `sound`（`on`/`off`，音频开关，默认 `off`）这个字段，第一版完全没考虑到。
+- 重写 `data/vendor/imarouter.ts` 的 `videoRequest`：按 `model.modelName` 是否以 `kling` 开头分两条路径组装请求体——Kling 走 `{ model, duration, mode, sound, prompt?, aspect_ratio?, image/image_list/video_list }`，不再碰 `metadata`，也不再对 Kling 走 `uploadAssetAndGetReference()` 那条 asset:// 上传流程（有公网 url 直接传 url，没有退回 base64，但 base64 这条路官方文档没明确说支持，没有真实调用验证过）；Seedance 路径完全不变。我们系统自己的 `1080p`/`720p` 设置对 Kling 近似映射成 `mode=pro`/`mode=std`——这个映射关系本身也没有官方文档背书，只是没有更好的信息来源时的合理猜测。
+- `durationResolutionMap` 里 Kling 的 `resolution` 从最早瞎猜的 `["720p"]` 改成 `["720p", "1080p"]`（既然有 std/pro 两档画质，两个分辨率标签都留着，交给 mode 映射去处理），`audio` 从 `false` 改成 `"optional"`（Kling 明确支持 `sound: on/off`，之前抄错了 klingai.ts 直连版本的能力表）。
+
+**验证**：`npx tsc --noEmit -p .`、独立类型检查 `data/vendor/imarouter.ts`、`npx vue-tsc -b --force` 均 clean。请求体字段名/schema 已经对着官方 OpenAPI spec 核对过，但仍然**没有真实调用过**——`.env` 里还没配 ImaRouter 相关的 Kling 权限/额度，尤其是 base64 图片是否被接受、`mode` 到底是不是精确对应 720p/1080p，这两点官方文档没有明确说明，等真的选中它渲染一次成片时再验证。
+
+---
+
 ## 2026-08-03 修复 vendor 沙盒里 setTimeout 未定义导致 Veo 续接直接报错
 
 **用户意见 / 触发原因**：上一条 Veo 续接时序修复刚上线，用户点重试就报错"setTimeout is not defined"（cut 74）。

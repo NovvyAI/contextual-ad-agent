@@ -1,19 +1,31 @@
 /**
- * ImaRouter (Seedance 视频) 供应商适配
+ * ImaRouter (Seedance / Kling 视频) 供应商适配
  * @version 1.0
  *
  * 说明：
- * 1) 只接视频生成，和 ads-gen-agent-main 的 tools/seedance.py 走的是同一个平台/同一套接口契约
- * 2) 提交任务 POST {baseUrl}/v1/videos，轮询 GET {baseUrl}/v1/videos/{id}
- * 3) 时长只接受 4/5/6/8/10/12/15 秒（ImaRouter Seedance 的硬性限制）
- * 4) 参考图/参考视频：优先走 ImaRouter 的素材审核流程（POST /v1/assets/group/create 建分组 →
- *    POST /v1/assets/create 传公网可访问的 url 建素材 → POST /v1/assets/get 轮询审核状态 →
- *    /v1/videos 里用 asset://<assetId> 引用），这是文档推荐的正式接入方式，也是唯一能避免
- *    "疑似真实人物" 隐私合规拦截的路径——真实测试过：同一张人像图，直接塞 base64 临时直链会被
- *    Seedance/Doubao 判定为疑似真实人物而拒绝，走这条素材审核流程能正常通过并渲染成功。
- *    只有 referenceList 里的图片没带公网 url（比如本机 dev 环境用的是 localhost，ImaRouter
- *    的服务器访问不到）时，才退回 base64 data URI 直传，这条路径本机开发环境验证过能跑通，
- *    但会带着"疑似真实人物"这类隐私合规拦截的风险，生产环境配了公网 ossURL 之后就不会再走这条。
+ * 1) 只接视频生成，Seedance 部分和 ads-gen-agent-main 的 tools/seedance.py 走的是同一个平台/同一套接口契约
+ * 2) 提交任务 POST {baseUrl}/v1/videos，轮询 GET {baseUrl}/v1/videos/{id}——两个模型共用同一对端点，
+ *    靠 body.model 字段路由到不同供应商，但两边请求体 schema 完全不同（见下）
+ * 3) Seedance 时长只接受 4/5/6/8/10/12/15 秒；参考图/参考视频优先走 ImaRouter 的素材审核流程
+ *    （POST /v1/assets/group/create 建分组 → POST /v1/assets/create 传公网可访问的 url 建素材 →
+ *    POST /v1/assets/get 轮询审核状态 → /v1/videos 里用 asset://<assetId> 引用），这是文档推荐的
+ *    正式接入方式，也是唯一能避免"疑似真实人物"隐私合规拦截的路径——真实测试过：同一张人像图，
+ *    直接塞 base64 临时直链会被 Seedance/Doubao 判定为疑似真实人物而拒绝，走这条素材审核流程能
+ *    正常通过并渲染成功。只有 referenceList 里的图片没带公网 url（比如本机 dev 环境用的是
+ *    localhost，ImaRouter 的服务器访问不到）时，才退回 base64 data URI 直传，这条路径本机开发
+ *    环境验证过能跑通，但会带着"疑似真实人物"这类隐私合规拦截的风险，生产环境配了公网 ossURL
+ *    之后就不会再走这条。
+ * 4) Kling v3 Omni（modelName: kling-v3-omni-video）是完全不同的请求 schema，照官方 OpenAPI
+ *    （https://doc.imarouter.com/openapi/en.yaml，搜 KlingV3OmniVideoCreateRequest）核对过：
+ *    `additionalProperties: false`，没有 Seedance 那套 metadata/resolution 字段，也不认识
+ *    asset:// 引用（image/images/image_list 官方声明是 format:uri，只提到公网 url，没提到
+ *    asset:// 这种协议）；画质档位不是靠传分辨率数字，是靠 mode 字段（std/pro，默认 std）；
+ *    真实字段是 model/prompt/duration/aspect_ratio/mode/sound/image/images/image_list/
+ *    video_url/video_list。**真实调用验证过：image 字段不接受 base64 data URI**——传了会导致
+ *    ImaRouter 后端拿这段 base64 字符串去 wget 下载，命令行参数长度爆掉直接报错（cut 76 真实
+ *    复现），不是等接口报"格式不对"这种干净的错。所以和 Seedance 不一样，Kling 这条路径完全没有
+ *    "没有公网地址就退回 base64"这个后备选项——本机 dev 环境没配 ossURL 时，选 Kling 且需要传参考图
+ *    会直接在 videoRequest 里提前抛出明确报错，不会真的把请求发出去。
  */
 // ============================================================
 // 类型定义
@@ -138,12 +150,25 @@ const vendor: VendorConfig = {
       audio: "optional",
       durationResolutionMap: [{ duration: [4, 5, 6, 8, 10, 12, 15], resolution: ["480p", "720p", "1080p"] }],
     },
+    // 时长照 ImaRouter 官方 OpenAPI 里 KlingV3VideoDuration 的确认值（3-15 秒任意整数）。
+    // 分辨率这个模型的请求体里根本没有对应字段（不像 Seedance 能显式传 resolution）——画质是靠
+    // mode（std/pro）控制的，这里的 720p/1080p 只是我们系统自己给用户看的近似档位标签，实际请求时
+    // videoRequest 会把它映射成 mode=std/pro，不代表官方保证这两个 mode 分别精确对应这两个分辨率，
+    // 没有真实调用验证过。参考图数量（最多 7 张图 + 1 段视频）是照抄可灵官方能力，但目前
+    // videoGenAgent 的 Stage B 每次只传 1 张草案图，用不上这个上限。
+    {
+      name: "Kling v3 Omni",
+      modelName: "kling-v3-omni-video",
+      type: "video",
+      mode: ["text", "singleImage", ["imageReference:7", "videoReference:1"]],
+      audio: "optional",
+      durationResolutionMap: [{ duration: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["720p", "1080p"] }],
+    },
   ],
 };
 // ============================================================
 // 辅助函数
 // ============================================================
-const ALLOWED_DURATIONS = [4, 5, 6, 8, 10, 12, 15];
 const TERMINAL_OK = ["succeeded", "completed", "success"];
 const TERMINAL_FAIL = ["failed", "error", "cancelled", "canceled"];
 
@@ -155,10 +180,19 @@ const getHeaders = () => {
   return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
 };
 
-const clampDuration = (duration: number): number => {
-  if (ALLOWED_DURATIONS.includes(duration)) return duration;
+// 按具体模型自己声明的 durationResolutionMap clamp，不再用 Seedance 专属的硬编码档位——
+// Kling v3 Omni 加进来之后，两个模型允许的时长/分辨率档位并不一样（Kling 没有 1080p，
+// 时长档位也更密），clamp 逻辑必须按 model 走，不能所有模型共用一份档位表。
+const clampToAllowed = (value: number, allowed: number[]): number => {
+  if (allowed.length === 0 || allowed.includes(value)) return value;
   // 取最接近的一个允许值，而不是直接报错，体验更好
-  return ALLOWED_DURATIONS.reduce((best, d) => (Math.abs(d - duration) < Math.abs(best - duration) ? d : best));
+  return allowed.reduce((best, v) => (Math.abs(v - value) < Math.abs(best - value) ? v : best));
+};
+
+const clampResolution = (resolution: string, allowed: string[]): string => {
+  if (allowed.length === 0 || allowed.includes(resolution)) return resolution;
+  // 分辨率没有"数值最接近"的自然概念，退回这个模型支持的第一档（当前两个模型都只有一档以上时取最高档在前）
+  return allowed[0];
 };
 
 const isPublicUrl = (url: string): boolean => /^https?:\/\//i.test(url) && !/^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/i.test(url);
@@ -238,14 +272,29 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
   return "";
 };
 
+const isKlingModel = (modelName: string): boolean => modelName.startsWith("kling");
+
 const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<string> => {
   const headers = getHeaders();
-  const duration = clampDuration(config.duration);
+  const allowed = model.durationResolutionMap[0] ?? { duration: [], resolution: [] };
+  const duration = clampToAllowed(config.duration, allowed.duration);
+  const kling = isKlingModel(model.modelName);
 
   const imageItems = (config.referenceList || []).filter((r): r is Extract<ReferenceList, { type: "image" }> => r.type === "image");
   const imageRefs: string[] = [];
   for (const item of imageItems) {
-    if (item.url && isPublicUrl(item.url)) {
+    if (kling) {
+      // 真实调用验证过：Kling 这条路由不接受 base64 data URI——传了之后 ImaRouter 后端会拿这个
+      // "url" 去做 wget 下载，一个几百 KB 的 base64 字符串当命令行参数直接把 wget 干爆（真实报错：
+      // "wget download failed: fork/exec /usr/bin/wget: argument list too long"，cut 76 上真实
+      // 复现过）。不像 Seedance 那样"没有公网地址就退回 base64 直传"还能勉强跑，Kling 没有任何
+      // 退路——本机没配 ossURL 时就直接在这里报清楚的错，不要把一个必然失败的 base64 请求发出去，
+      // 让用户在下游收到一个不知所云的 wget 报错。
+      if (!item.url || !isPublicUrl(item.url)) {
+        throw new Error("Kling v3 Omni 只接受公网可访问的图片 URL，不支持 base64 直传——这台机器还没配置公网 ossURL，暂时没法用这个模型生成参考图视频。");
+      }
+      imageRefs.push(item.url);
+    } else if (item.url && isPublicUrl(item.url)) {
       imageRefs.push(await uploadAssetAndGetReference(headers, item.url));
     } else {
       imageRefs.push(`data:image/png;base64,${item.base64}`);
@@ -254,18 +303,30 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   const videoRefs = (config.referenceList || []).filter((r) => r.type === "video").map((r) => `data:video/mp4;base64,${r.base64}`);
   const audioRefs = (config.referenceList || []).filter((r) => r.type === "audio").map((r) => `data:audio/mp3;base64,${r.base64}`);
 
-  const body: any = {
-    model: model.modelName,
-    prompt: config.prompt || "",
-    duration,
-    metadata: { resolution: config.resolution || "1080p" },
-  };
-  if (config.aspectRatio) body.aspect_ratio = config.aspectRatio;
-  if (videoRefs.length > 0) body.video_url = videoRefs[0];
-  if (imageRefs.length > 0) body.images = imageRefs;
-  if (audioRefs.length > 0) body.metadata.reference_audio_urls = audioRefs;
+  let body: any;
+  let resolutionLabel: string;
+  if (kling) {
+    // Kling v3 Omni 的请求体和 Seedance 完全不同（additionalProperties:false，字段名也不一样），
+    // 详见文件顶部说明。没有 resolution 字段，画质档位靠 mode（std/pro）控制——用我们系统自己的
+    // 720p/1080p 设置近似映射到 std/pro，不代表官方保证这个映射关系精确对应分辨率数值。
+    resolutionLabel = clampResolution(config.resolution || "1080p", allowed.resolution);
+    const mode = resolutionLabel === "1080p" ? "pro" : "std";
+    body = { model: model.modelName, duration, mode, sound: config.audio ? "on" : "off" };
+    if (config.prompt) body.prompt = config.prompt;
+    if (config.aspectRatio) body.aspect_ratio = config.aspectRatio;
+    if (videoRefs.length > 0) body.video_list = videoRefs.map((v) => ({ video_url: v }));
+    else if (imageRefs.length === 1) body.image = imageRefs[0];
+    else if (imageRefs.length > 1) body.image_list = imageRefs;
+  } else {
+    resolutionLabel = clampResolution(config.resolution || "1080p", allowed.resolution);
+    body = { model: model.modelName, prompt: config.prompt || "", duration, metadata: { resolution: resolutionLabel } };
+    if (config.aspectRatio) body.aspect_ratio = config.aspectRatio;
+    if (videoRefs.length > 0) body.video_url = videoRefs[0];
+    if (imageRefs.length > 0) body.images = imageRefs;
+    if (audioRefs.length > 0) body.metadata.reference_audio_urls = audioRefs;
+  }
 
-  logger(`[ImaRouter 视频] 提交任务: ${model.modelName}, duration=${duration}, imageRefs=${imageRefs.length}`);
+  logger(`[ImaRouter 视频] 提交任务: ${model.modelName}, duration=${duration}, resolution=${resolutionLabel}, imageRefs=${imageRefs.length}`);
   const submitResp = await axios.post(`${getBaseUrl()}/v1/videos`, body, { headers });
   const taskId = submitResp.data?.id || submitResp.data?.task_id;
   if (!taskId) {

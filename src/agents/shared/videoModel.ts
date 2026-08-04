@@ -4,12 +4,15 @@ import u from "@/utils";
  * 视频生成模型的可选项——和 imageModel.ts 是同一个思路。Seedance 中转（ImaRouter）是原来一直用的，
  * Veo 3.1（Google 官方直连）是备选：技术上支持图生视频，但用参考图时官方强制要求 8 秒时长
  * （没有 6-15 秒自由发挥的空间），选它就是接受这个时长被锁定的取舍，label 里直接写明。
+ * Kling v3 Omni 也是走 ImaRouter 中转（和 Seedance 同一个供应商 id，只是 modelName 不同），
+ * 官方能力上限只到 720p，没有 1080p，label 里同样直接写明这个取舍。
  * 用户在内容生成前选一次，选定后写进 ab_creativePlan.videoModelKey，这份方案下所有
  * 分镜成片渲染（包括运镜专用 revise）都读这一列，不用每次调用各自决定。
  */
 export const VIDEO_MODEL_OPTIONS = [
   { key: "imarouter:seedance-2.0", label: "Seedance 2.0" },
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
+  { key: "imarouter:kling-v3-omni-video", label: "Kling v3 Omni（ImaRouter 中转，固定 720p）" },
 ] as const;
 
 export type VideoModelKey = (typeof VIDEO_MODEL_OPTIONS)[number]["key"];
