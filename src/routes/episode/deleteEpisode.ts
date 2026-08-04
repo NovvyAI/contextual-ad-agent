@@ -29,6 +29,7 @@ export default router.post(
       await u.db("ab_creativePlan").whereIn("id", planIds).delete();
     }
     await u.db("ab_manifest").where("episodeId", episodeId).delete();
+    await u.db("ab_chatEvent").where("episodeId", episodeId).delete();
     await u.db("ab_episode").where("id", episodeId).delete();
 
     return res.status(200).send(success({ id: episodeId }));

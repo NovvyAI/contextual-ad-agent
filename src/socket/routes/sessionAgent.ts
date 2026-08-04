@@ -6,6 +6,7 @@ import * as state from "@/agents/sessionAgent/state";
 import * as videoGenAgent from "@/agents/videoGenAgent";
 import * as actions from "@/agents/sessionAgent/actions";
 import ResTool from "@/socket/resTool";
+import { wrapSocketForPersistence } from "@/socket/persistingSocket";
 
 async function verifyToken(rawToken: string): Promise<boolean> {
   const setting = await u.db("o_setting").where("key", "tokenKey").select("value").first();
@@ -39,7 +40,7 @@ export default (nsp: Namespace) => {
 
     console.log("[sessionAgent] 已连接:", socket.id, "episodeId:", episodeId);
 
-    const resTool = new ResTool(socket, { episodeId });
+    const resTool = new ResTool(wrapSocketForPersistence(socket, episodeId), { episodeId });
     let abortController: AbortController | null = null;
 
     // plan:generate —— 确定性代码，不经过 LLM。选哪些广告素材参与是多选下拉框操作，不适合聊天触发，保留纯按钮
@@ -142,6 +143,22 @@ export default (nsp: Namespace) => {
 
     // chat —— 自由文字，交给 LLM 做意图路由（识别"确认/下一步"类意图 + 方案/内容 revise）
     socket.on("chat", async (data: { content: string }) => {
+      // 用户在聊天框里自己打的话，前端是本地直接拼进 messages 数组的，从来没经过 resTool/socket
+      // 事件这条通路——所以这里单独落一条 message 事件到 ab_chatEvent，只为了以后历史回放时能重建出
+      // 用户说过什么，不实时 emit（emit 了会在当前这次会话里造成重复气泡，前端已经本地显示过一次了）
+      await u.db("ab_chatEvent").insert({
+        episodeId,
+        eventType: "message",
+        payload: JSON.stringify({
+          id: u.uuid(),
+          role: "user",
+          status: "complete",
+          datetime: new Date().toISOString(),
+          content: [{ type: "text", data: data.content, status: "complete" }],
+        }),
+        createTime: Date.now(),
+      });
+
       abortController?.abort();
       abortController = new AbortController();
       const currentController = abortController;
