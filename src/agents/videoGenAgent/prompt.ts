@@ -137,12 +137,21 @@ export function assembleStageAPrompt(draft: StageADraft, hasEpisodeFrame: boolea
 /**
  * Stage B（Seedance singleImage 模式）：只有一张参考图（已确认的草案图本身），不存在多图消歧，
  * 不需要 @图N 编号——更接近 Toonflow-app wan2.6Single-imageFirstFrameMode.md 的单段式散文表达。
+ *
+ * videoModelKey 传入是为了按供应商决定要不要加"禁止出现文字"的约束——真实验证过 Veo 会在没有任何
+ * 文字指令的情况下自己凭空幻觉出字幕状的文字（模仿短剧硬字幕的视觉风格），因为不是真实字符串、只是
+ * 扩散模型在"画"文字纹理，渲染出来的中文基本都是乱码。Seedance 不加这条限制——它是把参考图（草案图）
+ * 里已有的真实文字（比如已组装完成的小游戏截图里的按钮/进度条文案）原样保留下来，不是凭空生成，本来
+ * 就是清晰的，加了"禁止文字"反而会让它把这些原本该保留的真实素材文字也一起去掉。
  */
-export function assembleStageBPrompt(draft: StageADraft): string {
+export function assembleStageBPrompt(draft: StageADraft, videoModelKey: string): string {
   const shotSizeEn = SHOT_SIZE_EN[draft.shotSize] ?? draft.shotSize;
   const cameraEn = CAMERA_MOVEMENT_EN[draft.cameraMovement] ?? draft.cameraMovement;
+  const noTextInstruction = videoModelKey.startsWith("google:veo")
+    ? " 画面中不要出现任何文字、字幕或说明性文本（包括模仿短剧风格的对白字幕）。"
+    : "";
   return (
     `${draft.emotionalTone}的氛围下，${draft.subjectAction}，${draft.lightingMood}。` +
-    `镜头以${draft.shotSize}（${shotSizeEn}）呈现，${draft.cameraMovement}（${cameraEn}）。`
+    `镜头以${draft.shotSize}（${shotSizeEn}）呈现，${draft.cameraMovement}（${cameraEn}）。${noTextInstruction}`
   );
 }
