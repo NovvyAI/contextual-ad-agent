@@ -16,6 +16,18 @@ const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
 const DEFAULT_DURATION_S = 6;
 
+/**
+ * 供应商实际渲染出来的时长和请求时传的 durationS 不一定一致——大部分供应商（比如 Seedance）会
+ * clamp 到最接近的允许档位，我们没法拿到供应商侧最终 clamp 后的准确值，只能用请求时的 durationS
+ * 近似记录。Veo 是例外：它的时长规则是我们自己在 google.ts 里写死实现的（图生视频固定 8 秒，
+ * 超过 8 秒就续接 7 秒、正好到 15 秒），这个逻辑我们自己知道，就没必要再退回近似值——直接算出
+ * 真实会是多少秒，记录准确的时长。
+ */
+function estimateActualDurationMs(videoModelKey: string, requestedDurationS: number): number {
+  if (videoModelKey.startsWith("google:veo")) return (requestedDurationS <= 8 ? 8 : 15) * 1000;
+  return requestedDurationS * 1000;
+}
+
 export interface DraftCutResult {
   bridgeCutId: number;
   draft: StageADraft;
@@ -261,9 +273,7 @@ async function performStageBRender(bridgeCutId: number, creativePlanId: number, 
   const relPath = `bridgeCut/${bridgeCutId}/render-${Date.now()}.mp4`;
   await video.save(relPath);
   const videoUrl = await u.oss.getFileUrl(relPath);
-  // 供应商实际渲染的是 clampDuration 之后离 durationS 最近的允许档位（4/5/6/8/10/12/15秒），
-  // 这里没有拿到供应商侧最终 clamp 后的准确值，用请求时的 durationS 近似记录，和之前固定 6 秒时的做法一致
-  const durationMs = durationS * 1000;
+  const durationMs = estimateActualDurationMs(videoModelKey, durationS);
 
   const evaluation = await evaluateRender(draft, durationMs);
 
