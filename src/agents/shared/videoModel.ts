@@ -9,6 +9,8 @@ import u from "@/utils";
  * MiniMax Hailuo 2.3 同样走 ImaRouter 中转，时长官方硬性只有 6/10 两档（不是任意整数），
  * 选 1080p 时官方还会强制把时长锁定成 6 秒——这两条限制都在 data/vendor/imarouter.ts 里处理，
  * 这里的 label 只提示"时长档位有限"，不复述具体数字，避免和供应商脚本里的真实约束写重复容易漂移。
+ * Vidu Q3 Turbo 也走 ImaRouter 中转，是目前分辨率映射最干净的一个——官方 720p/1080p 和我们系统
+ * 的设置一一对应，不用近似映射；时长官方支持 1-16 秒任意整数，比我们系统 6-15 秒的范围还宽。
  * 用户在内容生成前选一次，选定后写进 ab_creativePlan.videoModelKey，这份方案下所有
  * 分镜成片渲染（包括运镜专用 revise）都读这一列，不用每次调用各自决定。
  */
@@ -17,6 +19,7 @@ export const VIDEO_MODEL_OPTIONS = [
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
   { key: "imarouter:kling-v3-omni-video", label: "Kling v3 Omni（ImaRouter 中转，固定 720p）" },
   { key: "imarouter:MiniMax-Hailuo-2.3", label: "MiniMax Hailuo 2.3（ImaRouter 中转，时长限 6/10 秒）" },
+  { key: "imarouter:viduq3-turbo", label: "Vidu Q3 Turbo（ImaRouter 中转）" },
 ] as const;
 
 export type VideoModelKey = (typeof VIDEO_MODEL_OPTIONS)[number]["key"];

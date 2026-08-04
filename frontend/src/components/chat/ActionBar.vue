@@ -29,6 +29,7 @@ const videoModelOptions = [
   { key: "google:veo-3.1-generate-preview", label: "Veo 3.1（官方直连，固定8秒）" },
   { key: "imarouter:kling-v3-omni-video", label: "Kling v3 Omni（ImaRouter 中转，固定 720p）" },
   { key: "imarouter:MiniMax-Hailuo-2.3", label: "MiniMax Hailuo 2.3（ImaRouter 中转，时长限 6/10 秒）" },
+  { key: "imarouter:viduq3-turbo", label: "Vidu Q3 Turbo（ImaRouter 中转）" },
 ];
 const selectedVideoModelKey = ref(videoModelOptions[0].key);
 // 和后端 src/agents/shared/videoResolution.ts 里的 VIDEO_RESOLUTION_OPTIONS 保持一致——只给两个

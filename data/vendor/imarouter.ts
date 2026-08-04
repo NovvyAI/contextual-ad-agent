@@ -1,10 +1,10 @@
 /**
- * ImaRouter (Seedance / Kling / MiniMax 视频) 供应商适配
+ * ImaRouter (Seedance / Kling / MiniMax / Vidu 视频) 供应商适配
  * @version 1.0
  *
  * 说明：
  * 1) 只接视频生成，Seedance 部分和 ads-gen-agent-main 的 tools/seedance.py 走的是同一个平台/同一套接口契约
- * 2) 提交任务 POST {baseUrl}/v1/videos，轮询 GET {baseUrl}/v1/videos/{id}——三个模型共用同一对端点，
+ * 2) 提交任务 POST {baseUrl}/v1/videos，轮询 GET {baseUrl}/v1/videos/{id}——四个模型共用同一对端点，
  *    靠 body.model 字段路由到不同供应商，但每家请求体 schema 完全不同（见下）
  * 3) Seedance 时长只接受 4/5/6/8/10/12/15 秒；参考图/参考视频优先走 ImaRouter 的素材审核流程
  *    （POST /v1/assets/group/create 建分组 → POST /v1/assets/create 传公网可访问的 url 建素材 →
@@ -37,6 +37,18 @@
  *    维度 clamp 的 `clampToAllowed`/`clampResolution`，videoRequest 里单独处理。参考图字段
  *    `metadata.first_frame_image` 是 `format:uri`，和 Kling 一样只认公网 url、不接受 base64，也不认识
  *    asset:// 引用——用同一套"没有公网 url 就提前报错"的处理。
+ * 6) Vidu（modelName: viduq3-turbo）文档同样给了两个等价端点（`POST /v1/video/generations` 和
+ *    `POST /v1/videos`，官方原话"choose one of the two, the parameter format is the same"），
+ *    照抄 MiniMax 的选择，走 `/v1/videos`。这家的 schema（`ViduVideoRequest`）没有声明
+ *    `additionalProperties: false`（比 Kling/MiniMax 宽松），字段是 model/prompt/duration/size/
+ *    images/metadata.resolution——**注意 `size` 在这家指的是宽高比**（`16:9`/`9:16`/`1:1`，默认
+ *    `16:9`），不是分辨率，跟 MiniMax 那边 `size` 指分辨率档位是两回事，容易搞混，实现时格外注意别
+ *    把这两家的字段名张冠李戴。真正的分辨率在 `metadata.resolution`（`540p`/`720p`/`1080p`），和我们
+ *    系统自己的 720p/1080p 设置正好一一对应，不用像 Kling/MiniMax 那样近似映射。`viduq3-turbo` 属于
+ *    q3 系列，时长官方支持 1-16 秒任意整数，比我们系统 6-15 秒的范围还宽，基本不会被 clamp。参考图
+ *    `images` 字段官方描述"please confirm they are accessible when submitting"，虽然没有像 Kling/
+ *    MiniMax 那样显式标 `format:uri`，但没有任何例子展示接受 base64，保守起见按同样风险处理——
+ *    要求公网 url，没有就提前报错。
  */
 // ============================================================
 // 类型定义
@@ -187,6 +199,17 @@ const vendor: VendorConfig = {
       audio: false,
       durationResolutionMap: [{ duration: [6, 10], resolution: ["768p", "1080p"] }],
     },
+    // viduq3-turbo 属于 q3 系列，官方时长支持 1-16 秒任意整数，比我们系统 6-15 秒的范围还宽，
+    // 基本不会被 clamp。分辨率（metadata.resolution）官方支持 540p/720p/1080p，和我们系统的
+    // 720p/1080p 设置正好一一对应，四个模型里唯一不需要近似映射的一个。
+    {
+      name: "Vidu Q3 Turbo",
+      modelName: "viduq3-turbo",
+      type: "video",
+      mode: ["text", "singleImage"],
+      audio: false,
+      durationResolutionMap: [{ duration: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], resolution: ["720p", "1080p"] }],
+    },
   ],
 };
 // ============================================================
@@ -295,17 +318,19 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
   return "";
 };
 
-type VendorFamily = "seedance" | "kling" | "minimax";
+type VendorFamily = "seedance" | "kling" | "minimax" | "vidu";
 const vendorFamily = (modelName: string): VendorFamily => {
   if (modelName.startsWith("kling")) return "kling";
   if (modelName.startsWith("MiniMax")) return "minimax";
+  if (modelName.startsWith("vidu")) return "vidu";
   return "seedance";
 };
 
-// Kling 和 MiniMax 的参考图字段都只认公网 url（format:uri），不接受 base64、也不认识 asset:// 引用——
-// 真实调用验证过 Kling 这条（cut 76，wget 参数过长），MiniMax 官方文档同样明确写了 format:uri，
-// 没有另外的兜底格式，按同一套风险处理，没配公网 ossURL 时提前报错，不发必然失败的请求。
-const PUBLIC_URL_ONLY_FAMILIES: VendorFamily[] = ["kling", "minimax"];
+// Kling/MiniMax/Vidu 的参考图字段都只认公网 url，不接受 base64、也不认识 asset:// 引用——真实调用
+// 验证过 Kling 这条（cut 76，wget 参数过长），MiniMax 官方文档明确写了 format:uri，Vidu 虽然没有
+// 显式标 format:uri 但官方例子清一色是公网 url、没有 base64 示例，按同样风险处理，没配公网 ossURL
+// 时提前报错，不发必然失败的请求。
+const PUBLIC_URL_ONLY_FAMILIES: VendorFamily[] = ["kling", "minimax", "vidu"];
 
 const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<string> => {
   const headers = getHeaders();
@@ -357,6 +382,16 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
     body = { model: model.modelName, duration, size: resolutionLabel };
     if (config.prompt) body.prompt = config.prompt;
     if (imageRefs.length > 0) body.metadata = { first_frame_image: imageRefs[0] };
+  } else if (family === "vidu") {
+    // Vidu 的请求体字段是 model/prompt/duration/size/images/metadata.resolution——注意这家的
+    // `size` 指宽高比（16:9/9:16/1:1），不是分辨率，别和 MiniMax 的 size（指分辨率档位）搞混。
+    // 真正的分辨率在 metadata.resolution（540p/720p/1080p），和我们系统的 720p/1080p 设置正好
+    // 一一对应，不需要近似映射。
+    resolutionLabel = clampResolution(config.resolution || "1080p", allowed.resolution);
+    body = { model: model.modelName, duration, metadata: { resolution: resolutionLabel } };
+    if (config.prompt) body.prompt = config.prompt;
+    if (config.aspectRatio) body.size = config.aspectRatio;
+    if (imageRefs.length > 0) body.images = imageRefs;
   } else {
     resolutionLabel = clampResolution(config.resolution || "1080p", allowed.resolution);
     body = { model: model.modelName, prompt: config.prompt || "", duration, metadata: { resolution: resolutionLabel } };
