@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>contextual-ad-agent · Agent 分步详解</title>
+<style>
+  :root {
+    --bg: #0a0f16;
+    --bg-panel: #0f1720;
+    --bg-panel-2: #0d141d;
+    --grid: rgba(120, 150, 180, 0.06);
+    --ink: #dce6ef;
+    --ink-dim: #8ea3b8;
+    --ink-faint: #5b6f83;
+    --rule: #1e2b38;
+    --rule-soft: #16212c;
+    --db: #4a9dd6;
+    --db-bg: #0f2942;
+    --agent: #2dd4bf;
+    --agent-bg: #0f3630;
+    --skill: #e0ac4a;
+    --skill-bg: #2e2410;
+    --fe: #b98ef0;
+    --fe-bg: #241c33;
+    --gate: #e0716a;
+    --gate-bg: #331617;
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 24px 100px;
+  }
+
+  header {
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 24px;
+    margin-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--agent);
+    margin: 0 0 10px;
+  }
+
+  h1 {
+    font-size: clamp(22px, 3.2vw, 30px);
+    font-weight: 650;
+    margin: 0 0 10px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .sub {
+    color: var(--ink-dim);
+    font-size: 14.5px;
+    line-height: 1.65;
+    max-width: 820px;
+    margin: 0 0 4px;
+  }
+
+  .sub code, .step-body code, .legend-card code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    color: var(--ink);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .toc {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px;
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .toc li a {
+    display: block;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    border: 1px solid var(--rule);
+    background: var(--bg-panel);
+    border-radius: 8px;
+    padding: 9px 12px;
+    transition: border-color .15s, color .15s;
+  }
+  .toc li a:hover { border-color: var(--agent); color: var(--ink); }
+  .toc .toc-num { font-family: var(--mono); color: var(--agent); margin-right: 6px; }
+
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+    margin: 24px 0 8px;
+  }
+  .legend-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .legend-card .swatch-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .legend-card .name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .legend-card .desc { font-size: 12px; color: var(--ink-faint); line-height: 1.5; margin: 0; }
+
+  .step {
+    margin-top: 40px;
+    border-top: 1px solid var(--rule);
+    padding-top: 28px;
+    scroll-margin-top: 20px;
+  }
+
+  .step-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .step-num {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--bg);
+    background: var(--agent);
+    border-radius: 6px;
+    padding: 3px 8px;
+    flex: none;
+    font-weight: 700;
+    margin-top: 3px;
+  }
+  .step-num.gate { background: var(--gate); }
+  .step-head h2 {
+    font-size: 19px;
+    margin: 0 0 4px;
+    font-weight: 650;
+  }
+  .step-head .fn {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--agent);
+  }
+  .step-head .skillfile {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--skill);
+    margin-left: 10px;
+  }
+  .step-tagline {
+    color: var(--ink-dim);
+    font-size: 13.5px;
+    margin: 6px 0 0;
+    line-height: 1.6;
+    max-width: 760px;
+  }
+
+  .step-body {
+    display: grid;
+    grid-template-columns: minmax(280px, 380px) 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 880px) {
+    .step-body { grid-template-columns: 1fr; }
+  }
+
+  .detail-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .detail-card h3 {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    margin: 14px 0 6px;
+    font-weight: 650;
+  }
+  .detail-card h3:first-child { margin-top: 0; }
+  .detail-card ul {
+    margin: 0 0 4px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  .detail-card li { margin-bottom: 4px; }
+  .detail-card li::marker { color: var(--ink-faint); }
+  .detail-card p {
+    font-size: 13px;
+    line-height: 1.65;
+    margin: 0 0 4px;
+    color: var(--ink);
+  }
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 5px;
+    margin-right: 5px;
+    margin-bottom: 3px;
+  }
+  .tag.db { background: var(--db-bg); color: #cfe8ff; border: 1px solid rgba(74,157,214,.4); }
+  .tag.write { background: var(--gate-bg); color: #ffd4d0; border: 1px solid rgba(224,113,106,.4); }
+
+  .diagram-wrap {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 16px;
+    overflow-x: auto;
+  }
+  .diagram-wrap .mermaid { margin: 0; }
+  /* mermaid 的 foreignObject label 内部尺寸计算按 content-box 假设来的，
+     页面全局 box-sizing:border-box 会让实际渲染框比计算时小，导致文字被裁切 */
+  .diagram-wrap foreignObject * { box-sizing: content-box; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    line-height: 1.7;
+  }
+  footer code { font-family: var(--mono); color: var(--ink-dim); }
+
+  @media (max-width: 700px) {
+    .page { padding: 28px 16px 60px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <p class="eyebrow">contextual-ad-agent · Agent 分步详解</p>
+    <h1>每一步 Agent 做了什么：输入 / 输出 / 数据库交互</h1>
+    <p class="sub">
+      这份文档不是整体数据流向图（那份见 <code>agent-data-flow.html</code>），而是把管线拆成 10 个具体步骤，
+      逐步说明每一步用了哪个 Agent、读了什么系统提示（<code>data/skills/*.md</code>）和模型、输入输出的数据结构是什么、
+      以及具体读写了哪些 SQLite 表（<code>src/lib/initDB.ts</code>）。步骤顺序即用户从上传 Episode 到拿到最终交付物的真实操作顺序。
+    </p>
+    <ol class="toc">
+      <li><a href="#step-1"><span class="toc-num">01</span>Episode 分析</a></li>
+      <li><a href="#step-2"><span class="toc-num">02</span>广告素材分析</a></li>
+      <li><a href="#step-3"><span class="toc-num">03</span>创意方案生成 / 调整</a></li>
+      <li><a href="#step-4"><span class="toc-num">04</span>分镜草案生成 / 调整（Stage A）</a></li>
+      <li><a href="#step-5"><span class="toc-num">05</span>确认全部分镜草案</a></li>
+      <li><a href="#step-6"><span class="toc-num">06</span>成片渲染 / 运镜调整（Stage B）</a></li>
+      <li><a href="#step-7"><span class="toc-num">07</span>翻牌配对小游戏组装 / 调整</a></li>
+      <li><a href="#step-8"><span class="toc-num">08</span>自定义玩法生成 / 调整</a></li>
+      <li><a href="#step-9"><span class="toc-num">09</span>落地终审</a></li>
+      <li><a href="#step-10"><span class="toc-num">10</span>最终交付物组装</a></li>
+    </ol>
+    <div class="legend">
+      <div class="legend-card">
+        <div class="swatch-row"><span class="swatch" style="background:var(--skill)"></span><span class="name">Skill 文件</span></div>
+        <p class="desc"><code>data/skills/*.md</code>，运行时读入当 system prompt，决定 Agent 的判断标准和输出风格</p>
+      </div>
+      <div class="legend-card">
+        <div class="swatch-row"><span class="swatch" style="background:var(--db)"></span><span class="name">数据库表</span></div>
+        <p class="desc">SQLite（<code>ab_</code> 前缀），Agent 间真正的通信总线，大多只传 id、下游自己重新查库</p>
+      </div>
+      <div class="legend-card">
+        <div class="swatch-row"><span class="swatch" style="background:var(--agent)"></span><span class="name">Agent / 模型调用</span></div>
+        <p class="desc">实际执行 LLM 推理或图片/视频生成的调用节点</p>
+      </div>
+      <div class="legend-card">
+        <div class="swatch-row"><span class="swatch" style="background:var(--gate)"></span><span class="name">代码闸门 / 终审</span></div>
+        <p class="desc">不调模型、由代码或规则直接判定的检查点（如产物存在性检查、全部确认才推进）</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ STEP 1 ============ -->
+  <section class="step" id="step-1">
+    <div class="step-head">
+      <span class="step-num">01</span>
+      <div>
+        <h2>Episode 分析<span class="skillfile">storyboard_agent.md</span></h2>
+        <div class="fn">StoryboardAgent.analyzeEpisode(episodeId)</div>
+        <p class="step-tagline">把一整集短剧视频转成结构化的剧情/角色/情绪/结尾状态分析，是后面所有创意决策的地基。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>ab_episode.sourceFilePath</code>（用户上传的短剧视频文件）</li>
+          <li>代码预处理产出：<code>fullFrames</code>（全片按 2s 间隔抽帧）、<code>tailFrames</code>（结尾 10s 内按 1s 间隔密集抽帧）、台词转写（有音轨才做 ASR）</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>把编号截图（Frame N / Tail frame N）+ 台词转写一起喂给 <code>claude-opus-4-8</code>，产出剧情梗概、主要角色列表、情绪基调随时间变化的节点、关键画面、结尾状态（含"观众看完后的情绪状态"这个供下游承接用的心理落点）。同时可选地从 <code>fullFrames</code> 里挑出最多 8 帧候选素材——优先保证每个主要角色都至少有一帧清晰展示外貌的画面。</p>
+        <p>代码再把候选帧序号映射成真实文件名（<code>tileCandidates</code>），不查模型。</p>
+        <h3>输出</h3>
+        <ul>
+          <li><code>episodeAnalysisSchema</code> 对象：plot / characters[] / emotionArc[] / keyVisuals[] / endingState{...} / tileCandidateFrameIndices[]</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_episode</span>
+        <span class="tag write">写 ab_episode.status / durationMs / episodeAnalysis</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n1_SRC["Episode 视频"]
+  n1_PRE["抽帧 + ASR"]
+  n1_FRAMES["截图 + 台词转写"]
+  n1_SKILL["storyboard_agent.md"]:::skill
+  n1_AI["claude-opus-4-8"]:::agent
+  n1_OUT["结构化剧情分析"]
+  n1_MAP["帧号→文件名"]
+  n1_DB[("ab_episode")]:::db
+
+  n1_SRC --> n1_PRE --> n1_FRAMES --> n1_AI
+  n1_SKILL -.系统提示.-> n1_AI
+  n1_AI --> n1_OUT --> n1_MAP --> n1_DB
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 2 ============ -->
+  <section class="step" id="step-2">
+    <div class="step-head">
+      <span class="step-num">02</span>
+      <div>
+        <h2>广告素材分析<span class="skillfile">ad_library_agent.md</span></h2>
+        <div class="fn">AdLibraryAgent.analyzeAd(adId)</div>
+        <p class="step-tagline">和 Episode 分析并列独立进行，把上传的广告素材（视频/图片/文案）转成结构化的游戏信息和品牌安全判断。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>ab_ad</code> 一行记录，按 <code>adType</code> 分三支：视频（<code>sourceFilePath</code>，按场景切换抽帧 + ASR）、图片（<code>sourceFilePath</code> 原图）、文案（<code>textContent</code>，截断 2000 字）</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p><code>claude-opus-4-8</code> 分析素材的调性、游戏信息（名称/类型/核心玩法/视觉风格/卖点）、品牌安全（是否安全 + 风险点列表）、内容摘要；视频素材额外挑出最多 8 帧适合直接当配对小游戏素材的候选帧（要求画面清晰、能代表真实界面/玩法）。</p>
+        <h3>输出</h3>
+        <ul>
+          <li><code>adAnalysisSchema</code> 对象，代码补上 <code>id/sourceType/hasVisualAsset/tileCandidates</code> 组成完整 <code>AdEntry</code></li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_ad</span>
+        <span class="tag write">写 ab_ad.status / analysisResult</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n2_SRC[("ab_ad")]:::db
+  n2_BRANCH{"adType 分支"}
+  n2_V["视频：抽帧+ASR"]
+  n2_I["图片原图"]
+  n2_T["文案文本"]
+  n2_SKILL["ad_library_agent.md"]:::skill
+  n2_AI["claude-opus-4-8"]:::agent
+  n2_OUT["调性/游戏信息/合规"]
+  n2_MAP["帧号→文件名"]
+  n2_DB[("ab_ad")]:::db
+
+  n2_SRC --> n2_BRANCH
+  n2_BRANCH --> n2_V --> n2_AI
+  n2_BRANCH --> n2_I --> n2_AI
+  n2_BRANCH --> n2_T --> n2_AI
+  n2_SKILL -.系统提示.-> n2_AI
+  n2_AI --> n2_OUT --> n2_MAP --> n2_DB
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 3 ============ -->
+  <section class="step" id="step-3">
+    <div class="step-head">
+      <span class="step-num">03</span>
+      <div>
+        <h2>创意方案生成 / 调整<span class="skillfile">director_creative.md + director_evaluator.md</span></h2>
+        <div class="fn">DirectorAgent.generatePlans(episodeId, adIds) / revisePlan(planId, feedback)</div>
+        <p class="step-tagline">两次独立模型调用：先构思方案，再单独打分评估——生成和评估的判断标准分别维护在两份 skill 里。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>ab_episode.episodeAnalysis</code>（必须已分析完成）</li>
+          <li>逐个 <code>ab_ad</code>（必须 <code>status=analyzed</code>），生成时可传多个 adId，通常一条广告对应一份方案</li>
+          <li>revise 额外输入：已有方案的 narrative/tone + 用户反馈文本</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>① 生成阶段：针对每条候选广告构思承接 Episode 结尾的创意方案（narrative 叙事衔接 + tone 情绪基调）。② 评估阶段：对生成的每份方案打分（叙事衔接可行性 / 游戏关联度 / 广告匹配度 / 综合分 + 点评），返回数量必须和方案数一一对应，否则直接报错。</p>
+        <p>revise 是单条版本：只重新生成/评估这一份方案，不影响同批次的其他方案。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>生成：每条候选广告一条新的 <code>ab_creativePlan</code> 记录（status=draft）</li>
+          <li>revise：原记录被覆盖更新（有损覆盖，不保留中间版本）</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_episode, ab_ad, ab_creativePlan（revise）</span><br/>
+        <span class="tag write">写 ab_creativePlan（insert / update）</span>
+        <span class="tag write">写 ab_reviseHistory（仅 revise，targetType=plan）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n3_EA[("ab_episode")]:::db
+  n3_ADS[("ab_ad ×N")]:::db
+  n3_SKILL1["director_creative.md"]:::skill
+  n3_GEN["claude-opus-4-8"]:::agent
+  n3_PLANS["方案草稿 ×N"]
+  n3_SKILL2["director_evaluator.md"]:::skill
+  n3_EVAL["claude-opus-4-8"]:::agent
+  n3_SCORES["4 项打分"]
+  n3_DBOUT[("ab_creativePlan")]:::db
+  n3_HIST[("ab_reviseHistory")]:::db
+
+  n3_EA --> n3_GEN
+  n3_ADS --> n3_GEN
+  n3_SKILL1 -.系统提示.-> n3_GEN
+  n3_GEN --> n3_PLANS --> n3_EVAL
+  n3_SKILL2 -.系统提示.-> n3_EVAL
+  n3_EVAL --> n3_SCORES --> n3_DBOUT
+  n3_DBOUT -.revise 回写.-> n3_HIST
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 4 ============ -->
+  <section class="step" id="step-4">
+    <div class="step-head">
+      <span class="step-num">04</span>
+      <div>
+        <h2>分镜草案生成 / 调整（Stage A）<span class="skillfile">video_gen_agent.md</span></h2>
+        <div class="fn">VideoGenAgent.generateDraftCut / reviseDraftCut(bridgeCutId, feedback)</div>
+        <p class="step-tagline">先用文字模型定分镜设计，再拼装 prompt 用图片模型出草案图——两次调用，中间穿插一次自评分。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>ab_bridgeCut</code>（type=video）→ <code>loadPlanContext(creativePlanId)</code> 反查 episodeAnalysis / ad / 已批准的 narrative+tone</li>
+          <li>参考图（可选，各自缺失不影响主流程）：Episode 结尾最后一帧、广告代表帧（优先用 AdLibraryAgent 挑的 tileCandidates）、已组装完成的游戏真实素材帧（呼应用）</li>
+          <li>revise 额外输入：已有 <code>scriptText</code> + 用户反馈</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>① 文字模型产出分镜设计：景别、运镜、主体动作/过渡呈现、光影氛围、情绪基调、构图备注、时长（6-15 秒自由决定，不固定值）；内部 <code>evaluateDraft()</code> 单独打一次参考分。② <code>assembleStageAPrompt()</code> 把参考图按 <code>@图N</code> 编号拼进最终 prompt，交给 <code>resolveImageModelKey()</code> 选出的图片模型（gpt-image-2 或 Gemini）生成草案图。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>草案图文件（<code>bridgeCut/{id}/draft-*.png</code>）+ 组装后的完整 prompt</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_creativePlan（imageModelKey）, ab_episode, ab_ad, ab_generatedSegment（游戏素材参考）</span><br/>
+        <span class="tag write">写 ab_generatedSegment（insert draftImage，旧版本 isSelected 清 0）</span>
+        <span class="tag write">写 ab_bridgeCut（scriptText / prompt / status=draft）</span>
+        <span class="tag write">写 ab_reviseHistory（仅 revise，targetType=bridgeCutDraft）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n4_PC["loadPlanContext()"]
+  n4_REF["参考图 ×3"]
+  n4_SKILL["video_gen_agent.md"]:::skill
+  n4_TXT["claude-opus-4-8"]:::agent
+  n4_DRAFT["StageADraft"]
+  n4_EVALFN["evaluateDraft()"]:::agent
+  n4_ASM["组装 @图N prompt"]
+  n4_IMGMODEL["选定图片模型"]:::db
+  n4_IMG["图片模型"]:::agent
+  n4_FILE["draft 图"]
+  n4_SEG[("ab_generatedSegment")]:::db
+  n4_CUT[("ab_bridgeCut")]:::db
+
+  n4_PC --> n4_TXT
+  n4_SKILL -.系统提示.-> n4_TXT
+  n4_TXT --> n4_DRAFT --> n4_EVALFN
+  n4_DRAFT --> n4_ASM
+  n4_REF --> n4_ASM
+  n4_IMGMODEL --> n4_IMG
+  n4_ASM --> n4_IMG --> n4_FILE --> n4_SEG
+  n4_DRAFT --> n4_CUT
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 5 ============ -->
+  <section class="step" id="step-5">
+    <div class="step-head">
+      <span class="step-num gate">05</span>
+      <div>
+        <h2>确认全部分镜草案<span class="skillfile">无 skill · 纯代码闸门</span></h2>
+        <div class="fn">VideoGenAgent.confirmAllCuts(creativePlanId)</div>
+        <p class="step-tagline">不调用任何模型——用户点"确认全部分镜草案"时触发的确定性校验，全部满足才整体推进，不部分推进。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li>该 <code>creativePlanId</code> 下所有 <code>type=video</code> 的 <code>ab_bridgeCut</code></li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>校验每一个 video cut 的 <code>status</code> 都是 <code>draft</code>，且都有一条已选定（<code>isSelected=1</code>）的草案图。任意一条不满足就整体报错拒绝，不会出现"一半确认一半没确认"的中间状态。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>全部满足条件的 cut，status 统一置为 <code>draftConfirmed</code>——后续 Stage B 渲染的前置条件</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_generatedSegment</span>
+        <span class="tag write">写 ab_bridgeCut.status</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n5_CUTS[("video 全部 cut")]:::db
+  n5_CHECK{"都已确认？"}:::gate
+  n5_FAIL["整体拒绝"]
+  n5_OK[("→ draftConfirmed")]:::db
+
+  n5_CUTS --> n5_CHECK
+  n5_CHECK -->|否| n5_FAIL
+  n5_CHECK -->|是，全部| n5_OK
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+  classDef gate fill:#331617,stroke:#e0716a,color:#ffd4d0,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 6 ============ -->
+  <section class="step" id="step-6">
+    <div class="step-head">
+      <span class="step-num">06</span>
+      <div>
+        <h2>成片渲染 / 运镜调整（Stage B）<span class="skillfile">video_gen_agent.md（仅运镜 revise）</span></h2>
+        <div class="fn">VideoGenAgent.renderStageB / reviseStageBMotion(bridgeCutId, feedback)</div>
+        <p class="step-tagline">renderStageB 直接复用已确认的草案文案渲染，不再调文字模型；只有运镜专用 revise 才会重新问一次模型。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li>已确认的草案图（base64 + 公网 URL）+ 已确认的 <code>scriptText</code></li>
+          <li><code>resolveVideoModelKey()</code> / <code>resolveVideoResolution()</code> 读用户为该方案选定的视频模型（Seedance / Veo）和分辨率</li>
+          <li>运镜 revise 额外输入：用户反馈——只允许模型改 <code>cameraMovement</code> / <code>emotionalTone</code> / <code>durationS</code>，其余字段强制锁定原值，避免 prompt 和已生成的静态图对不上</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p><code>assembleStageBPrompt(draft, videoModelKey)</code> 拼装最终 prompt（Veo 会额外带一句"禁止出现文字"约束，Seedance 不加，见已知问题记录），以 singleImage 模式调用图生视频模型渲染成片。渲染完用 <code>estimateActualDurationMs()</code> 记录真实时长（Veo 是我们自己写死的规则，直接算得准；其他供应商用请求时的 durationS 近似），内部 <code>evaluateRender()</code> 再打一次参考分。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>渲染视频文件（<code>bridgeCut/{id}/render-*.mp4</code>）</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_generatedSegment（草案图）, ab_creativePlan（模型/分辨率选择）</span><br/>
+        <span class="tag write">写 ab_bridgeCut（status: rendering→done/failed，durationMs，运镜 revise 时也改 scriptText）</span>
+        <span class="tag write">写 ab_generatedSegment（insert finalRender）</span>
+        <span class="tag write">写 ab_reviseHistory（仅运镜 revise，targetType=bridgeCutMotion）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n6_DRAFTIMG[("已选草案图")]:::db
+  n6_SCRIPT["已确认草案"]
+  n6_REVISE["运镜反馈"]:::skill
+  n6_REVISEAI["claude-opus-4-8"]:::agent
+  n6_MODELKEY["选定模型+分辨率"]:::db
+  n6_ASM["组装 prompt"]
+  n6_VID["视频模型"]:::agent
+  n6_FILE["render 视频"]
+  n6_DUR["记录真实时长"]
+  n6_SEG[("ab_generatedSegment")]:::db
+  n6_CUT[("ab_bridgeCut")]:::db
+
+  n6_SCRIPT --> n6_REVISE --> n6_REVISEAI --> n6_SCRIPT
+  n6_DRAFTIMG --> n6_ASM
+  n6_SCRIPT --> n6_ASM
+  n6_MODELKEY --> n6_ASM --> n6_VID --> n6_FILE --> n6_SEG
+  n6_FILE --> n6_DUR --> n6_CUT
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 7 ============ -->
+  <section class="step" id="step-7">
+    <div class="step-head">
+      <span class="step-num">07</span>
+      <div>
+        <h2>翻牌配对小游戏组装 / 调整<span class="skillfile">playable_agent.md + playable_evaluator.md</span></h2>
+        <div class="fn">PlayableAgent.assemblePlayable / revisePlayable(bridgeCutId, feedback)</div>
+        <p class="step-tagline">默认路径（非自定义玩法）：生成配置 → 备素材 → 注入模板 → 收尾打包，四步都是同一个函数内顺序完成。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>ab_bridgeCut</code>（type=playableGame）→ <code>loadPlanContext()</code></li>
+          <li>用户组装前可选勾选的候选参考图（Episode 帧或同方案 video cut 的草案图）</li>
+          <li>revise 额外输入：已有 <code>PlayableConfig</code> + 用户反馈</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>① 生成游戏标题、CTA 跳转链接、2-6 条配对素材 prompt；内部 <code>evaluatePlayable()</code> 打分。② 备素材：优先用 <code>ab_ad.tileCandidates</code>（AdLibraryAgent 挑的真实游戏截图，≥2 张才用），否则按 tilePrompts 逐条用图片模型生成（可带参考图）。③ 注入 <code>game.html</code> 模板。④ <code>finalizePlayablePackage()</code>：把同方案 video cut 已渲染的成片复制为游戏包的片头 <code>bridge.mp4</code>，注入容器页 <code>index.html</code>，落库。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>可交付的 playable bundle：<code>index.html</code>（容器）+ <code>game/index.html</code>（游戏本体）+ <code>game/assets/tiles/*</code></li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_creativePlan, ab_ad（tileCandidates）, ab_generatedSegment（video cut 成片）</span><br/>
+        <span class="tag write">写 ab_generatedSegment（insert finalRender）</span>
+        <span class="tag write">写 ab_bridgeCut（scriptText=config, status=done）</span>
+        <span class="tag write">写 ab_reviseHistory（仅 revise，targetType=playable）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n7_PC["loadPlanContext()"]
+  n7_SKILL["playable_agent.md"]:::skill
+  n7_AI["claude-opus-4-8"]:::agent
+  n7_CFG["游戏配置"]
+  n7_EVALFN["evaluatePlayable()"]:::agent
+  n7_TILEBR{"有真实截图？"}
+  n7_REAL["真实截图"]
+  n7_GEN["AI 生成素材图"]:::agent
+  n7_TPL["注入模板"]
+  n7_FIN["复制片头+落库"]
+  n7_BUNDLE["playable 包"]
+  n7_SEG[("ab_generatedSegment")]:::db
+  n7_CUT[("ab_bridgeCut")]:::db
+
+  n7_PC --> n7_AI
+  n7_SKILL -.系统提示.-> n7_AI
+  n7_AI --> n7_CFG --> n7_EVALFN
+  n7_CFG --> n7_TILEBR
+  n7_TILEBR -->|是| n7_REAL --> n7_TPL
+  n7_TILEBR -->|否| n7_GEN --> n7_TPL
+  n7_TPL --> n7_FIN --> n7_BUNDLE --> n7_SEG
+  n7_BUNDLE --> n7_CUT
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 8 ============ -->
+  <section class="step" id="step-8">
+    <div class="step-head">
+      <span class="step-num">08</span>
+      <div>
+        <h2>自定义玩法生成 / 调整<span class="skillfile">playable_custom_gamespec.md + playable_custom_codegen.md</span></h2>
+        <div class="fn">PlayableAgent.generateCustomGame / reviseCustomGame(bridgeCutId, description/feedback)</div>
+        <p class="step-tagline">和默认翻牌配对路径完全独立：规格 → 素材 → 代码生成+真实浏览器冒烟测试的重试循环，失败兜底策略两条路径还不一样。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li>首次：用户的玩法描述（可长可短）；revise：已有 <code>GameSpec</code> + 用户反馈</li>
+          <li>候选参考图 + 同方案 video cut 成片均匀抽 3 帧（延续视频里已定下的画风）</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>① 生成/调整 <code>GameSpec</code>：标题、CTA、玩法类型、通关目标、棋盘布局、交互规则、素材需求列表、"替用户做了哪些假设"列表——<b>首次生成失败直接回退翻牌配对</b>（步骤 07，保证总有产物交付）。② 按 <code>assetsNeeded</code> 逐条生成素材图。③ 代码生成 + 冒烟测试循环（最多 3 次：首次 + 2 次重试）：模型写游戏 HTML → Playwright 真实浏览器加载检测报错 → 不通过就把报错喂回重试。</p>
+        <p><b>失败兜底不对称</b>：首次生成耗尽重试仍不过 → 回退翻牌配对；revise 耗尽重试仍不过 → <b>保留用户原有能跑的游戏不动</b>，只报失败原因，不会用一个通用兜底顶掉用户本来满意的游戏。</p>
+        <h3>输出</h3>
+        <ul>
+          <li>自定义游戏 bundle（<code>assets/custom_N.png</code> 命名），或按上述规则回退的翻牌配对 bundle</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_creativePlan, ab_generatedSegment（video cut 成片抽帧）</span><br/>
+        <span class="tag write">写 ab_generatedSegment, ab_bridgeCut（同步骤 07 的收尾逻辑）</span>
+        <span class="tag write">写 ab_reviseHistory（仅 revise，targetType=customGame）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n8_DESC["描述 / 反馈"]
+  n8_SKILL1["gamespec.md"]:::skill
+  n8_SPEC_AI["claude-opus-4-8"]:::agent
+  n8_SPEC["GameSpec 规格"]
+  n8_SPECFAIL{"规格失败？"}
+  n8_FALLBACK1["回退翻牌配对"]:::gate
+  n8_ASSETS["生成素材图"]:::agent
+  n8_SKILL2["codegen.md"]:::skill
+  n8_CODE_AI["claude-opus-4-8"]:::agent
+  n8_SMOKE["浏览器冒烟测试"]:::gate
+  n8_RETRY{"通过？"}
+  n8_BUNDLE["自定义游戏包"]
+  n8_FALLBACK2["回退 / 保留原状"]:::gate
+
+  n8_DESC --> n8_SPEC_AI
+  n8_SKILL1 -.系统提示.-> n8_SPEC_AI
+  n8_SPEC_AI --> n8_SPEC --> n8_SPECFAIL
+  n8_SPECFAIL -->|是| n8_FALLBACK1
+  n8_SPECFAIL -->|否| n8_ASSETS --> n8_CODE_AI
+  n8_SKILL2 -.系统提示.-> n8_CODE_AI
+  n8_CODE_AI --> n8_SMOKE --> n8_RETRY
+  n8_RETRY -->|不通过，重试| n8_CODE_AI
+  n8_RETRY -->|通过| n8_BUNDLE
+  n8_RETRY -->|耗尽仍不过| n8_FALLBACK2
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+  classDef gate fill:#331617,stroke:#e0716a,color:#ffd4d0,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 9 ============ -->
+  <section class="step" id="step-9">
+    <div class="step-head">
+      <span class="step-num gate">09</span>
+      <div>
+        <h2>落地终审<span class="skillfile">supervisor_agent.md</span></h2>
+        <div class="fn">SupervisorAgent.runSupervision(creativePlanId)</div>
+        <p class="step-tagline">先做零成本的代码检查，通过了才花一次模型调用审内容——这是四个评估类 Agent 里唯一真正的拦截闸门。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>creativePlanId</code> → 找到唯一的 <code>playableGame</code> cut（M7 起固定两段式管线，video 段的成片已经被复制进游戏包当片头，终审只看这一段最终交付物）</li>
+          <li><code>loadPlanContext()</code> + 组装时用的代表性素材图（真实截图或 custom 生成图）</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p>① <code>codePreCheck()</code>：纯代码检查产物文件是否齐全（<code>index.html</code> / <code>game/index.html</code> / 素材图存在与否），不通过直接返回失败，<b>不调用模型</b>——客观能判断的问题不该花一次模型调用。② 通过才调 <code>claude-opus-4-8</code> 审内容合规、品牌安全、技术规格是否齐全。<code>passed</code> 是真正的拦截判定，不像其他三个 Agent（PlanEvaluator/DraftEvaluator/PlayableEvaluator）的分数只是给用户参考、不自动拦截。</p>
+        <h3>输出</h3>
+        <ul>
+          <li><code>SupervisionOutcome</code>：4 项打分 + passed + issues[] + feedback——<b>不落自己的表</b>，作为参数继续往下传给 Assembler</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_generatedSegment, ab_creativePlan, ab_episode, ab_ad</span><br/>
+        <span class="tag write" style="background:transparent;color:var(--ink-faint);border-color:var(--rule)">无直接写入</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n9_CUT[("playableGame cut")]:::db
+  n9_PRECHECK{"产物齐全？"}:::gate
+  n9_FAIL0["未调用模型"]
+  n9_PC["loadPlanContext()"]
+  n9_SKILL["supervisor_agent.md"]:::skill
+  n9_AI["claude-opus-4-8"]:::agent
+  n9_OUT["4 项打分 + passed"]
+  n9_DOWNSTREAM["传给 Assembler"]
+
+  n9_CUT --> n9_PRECHECK
+  n9_PRECHECK -->|不通过| n9_FAIL0
+  n9_PRECHECK -->|通过| n9_PC --> n9_AI
+  n9_SKILL -.系统提示.-> n9_AI
+  n9_AI --> n9_OUT --> n9_DOWNSTREAM
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+  classDef gate fill:#331617,stroke:#e0716a,color:#ffd4d0,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STEP 10 ============ -->
+  <section class="step" id="step-10">
+    <div class="step-head">
+      <span class="step-num gate">10</span>
+      <div>
+        <h2>最终交付物组装<span class="skillfile">无 skill · 纯代码</span></h2>
+        <div class="fn">Assembler.assemble(episodeId, creativePlanId, supervision?)</div>
+        <p class="step-tagline">不调用任何模型——把已经自包含的游戏包信息和终审结果打包成一条 manifest 记录，是整条管线的最后一步。</p>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="detail-card">
+        <h3>输入</h3>
+        <ul>
+          <li><code>episodeId</code> + <code>creativePlanId</code> + 步骤 09 的终审结果（可选）</li>
+          <li>找到 <code>playableGame</code> cut 已选定的 <code>finalRender</code> 段——本身已经是自包含的可交付游戏包（video 段成片在步骤 07/08 就已经被复制进去当片头了，不需要再拼接）</li>
+        </ul>
+        <h3>做了什么</h3>
+        <p><code>assembleCut()</code> 按 cut 类型分支：<code>playableGame</code> 直接返回已就绪的包路径；<code>video</code> 类型走的是历史遗留分支，会用 <code>concatVideos()</code>（ffmpeg）把 Episode 原片和桥接视频拼在一起——但 M7 起正式路径固定只交付 playableGame 段，这条 video 分支现在不会被 <code>assemble()</code> 触发。把交付物信息 + 终审结果打包成 <code>manifestJson</code>。</p>
+        <h3>输出</h3>
+        <ul>
+          <li><code>ab_manifest</code> 新记录：<code>finalFilePath</code> + <code>manifestJson</code>（含 deliverable / supervision / assets）</li>
+        </ul>
+        <h3>数据库交互</h3>
+        <span class="tag db">读 ab_bridgeCut, ab_creativePlan, ab_episode, ab_generatedSegment</span>
+        <span class="tag write">写 ab_manifest（insert）</span>
+      </div>
+      <div class="diagram-wrap">
+<pre class="mermaid">
+
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#132030','primaryTextColor': '#e8eef5','primaryBorderColor': '#3a4d61',
+  'lineColor': '#5b6f83','secondaryColor': '#1c2b3d','tertiaryColor': '#1c2b3d',
+  'fontFamily': 'ui-monospace, SFMono-Regular, Menlo, monospace','fontSize': '13px'
+}}}%%
+flowchart TB
+  n10_PLAN["creativePlanId"]
+  n10_FIND["已就绪游戏包"]:::db
+  n10_SUP["终审结果（可选）"]
+  n10_ASSEMBLE["assembleCut()"]
+  n10_DELIV["deliverable"]
+  n10_PACK["打包 manifestJson"]
+  n10_DB[("ab_manifest")]:::db
+
+  n10_PLAN --> n10_FIND --> n10_ASSEMBLE --> n10_DELIV --> n10_PACK
+  n10_SUP --> n10_PACK
+  n10_PACK --> n10_DB
+
+  classDef db fill:#0f2942,stroke:#4a9dd6,color:#cfe8ff,stroke-width:1.5px;
+  classDef agent fill:#0f3630,stroke:#2dd4bf,color:#c8fff2,stroke-width:1.5px;
+  classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
+</pre>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    编排层说明：以上 10 步具体"做什么"都不是自动串联的，而是由 <code>SessionAgent</code>（<code>src/agents/sessionAgent/{index,state}.ts</code>）根据聊天上下文和用户指令，通过 <code>run_sub_agent_*</code> 系列工具调用逐步触发——SessionAgent 自己不产出内容，只读 <code>ab_episode/ab_creativePlan/ab_bridgeCut</code> 判断当前处于哪个阶段、该调用哪个函数，判断标准见 <code>data/skills/session_agent_decision.md</code>。<br/>
+    对应代码：<code>src/agents/*/index.ts</code>、<code>src/agents/shared/{planContext,imageModel,videoModel,videoResolution,reviseHistory,cutLock}.ts</code>、<code>src/lib/initDB.ts</code>（表结构）。整体数据流向另见 <code>agent-data-flow.html</code>；系统架构综述见 <code>architecture-design.html</code>。
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({ startOnLoad: true, securityLevel: "loose" });
+</script>
+</body>
+</html>
