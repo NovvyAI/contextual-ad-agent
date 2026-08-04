@@ -242,6 +242,148 @@
      页面全局 box-sizing:border-box 会让实际渲染框比计算时小，导致文字被裁切 */
   .diagram-wrap foreignObject * { box-sizing: content-box; }
 
+  .appendix {
+    margin-top: 48px;
+    border-top: 1px solid var(--rule);
+    padding-top: 28px;
+    scroll-margin-top: 20px;
+  }
+  .appendix h2 {
+    font-size: 20px;
+    font-weight: 650;
+    margin: 0 0 8px;
+  }
+  .appendix > p.lead {
+    color: var(--ink-dim);
+    font-size: 13.5px;
+    line-height: 1.7;
+    max-width: 860px;
+    margin: 0 0 24px;
+  }
+  .subhead {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    font-weight: 650;
+    margin: 32px 0 4px;
+  }
+  .subhead-note {
+    color: var(--ink-dim);
+    font-size: 13px;
+    line-height: 1.65;
+    max-width: 860px;
+    margin: 0 0 16px;
+  }
+
+  .schema-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 16px;
+  }
+  .schema-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .schema-card .schema-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 16px;
+    background: var(--db-bg);
+    border-bottom: 1px solid var(--rule);
+  }
+  .schema-card .schema-title code {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    font-weight: 650;
+    color: #cfe8ff;
+  }
+  .schema-card .schema-title span.note {
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+  .schema-card table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  .schema-card td {
+    padding: 6px 16px;
+    border-top: 1px solid var(--rule-soft);
+    vertical-align: top;
+    line-height: 1.55;
+  }
+  .schema-card td:first-child {
+    font-family: var(--mono);
+    color: var(--ink);
+    white-space: nowrap;
+    width: 1%;
+  }
+  .schema-card td:nth-child(2) {
+    font-family: var(--mono);
+    color: var(--agent);
+    white-space: nowrap;
+    width: 1%;
+  }
+  .schema-card td:last-child { color: var(--ink-dim); }
+  .schema-card tr:first-child td { border-top: none; }
+  .schema-card .fk { color: var(--fe); }
+
+  .json-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .json-table th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .json-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    line-height: 1.6;
+    color: var(--ink-dim);
+  }
+  .json-table td:first-child { font-family: var(--mono); color: var(--ink); white-space: nowrap; }
+  .json-table td:nth-child(2) { font-family: var(--mono); color: var(--skill); white-space: nowrap; }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 12px; background: var(--bg-panel); padding: 4px 12px; }
+
+  .fw-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .fw-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .fw-card code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--ink-dim);
+  }
+  .fw-card p {
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.55;
+    margin: 5px 0 0;
+  }
+
   footer {
     margin-top: 48px;
     padding-top: 20px;
@@ -278,6 +420,7 @@
       <li><a href="#step-8"><span class="toc-num">08</span>自定义玩法生成 / 调整</a></li>
       <li><a href="#step-9"><span class="toc-num">09</span>落地终审</a></li>
       <li><a href="#step-10"><span class="toc-num">10</span>最终交付物组装</a></li>
+      <li><a href="#appendix-schema"><span class="toc-num">附录</span>数据库表结构总览</a></li>
     </ol>
     <div class="legend">
       <div class="legend-card">
@@ -927,6 +1070,172 @@ flowchart TB
   classDef skill fill:#2e2410,stroke:#e0ac4a,color:#f7e4bd,stroke-width:1.5px;
 </pre>
       </div>
+    </div>
+  </section>
+
+  <section class="appendix" id="appendix-schema">
+    <h2>附录：数据库表结构总览</h2>
+    <p class="lead">
+      存储是本地 SQLite（<code>data/db2.sqlite</code>），驱动是 <code>better-sqlite3</code>，通过 Knex 操作，表结构定义在 <code>src/lib/initDB.ts</code>（每次启动检查表是否存在，不存在才建，不做自动 migration）。
+      TypeScript 类型不是手写的——<code>src/utils/db.ts</code> 的 <code>initKnexType()</code> 每次 dev 模式启动时用 <code>@rmp135/sql-ts</code> 读当前库结构自动生成 <code>src/types/database.d.ts</code>，
+      所以新加一列之后，本地必须<b>重启一次服务</b>类型才会更新，改完代码类型报错先看是不是忘了重启。
+      下面先看这个项目实际业务用到的 8 张表（<code>ab_</code> 前缀），再看数据库里还有哪些和业务无关、模板自带的框架表。
+    </p>
+
+    <p class="subhead">业务表（ab_ 前缀）</p>
+    <p class="subhead-note">
+      8 张表全部用 <code>increments</code>（AUTOINCREMENT）做主键，不是随手选的——这几张表都有删除功能，普通自增以外的主键删除后号码会被回收复用，
+      新记录可能撞上刚删掉的旧记录的 id，导致前端按 id 缓存的会话状态串号、显示已删除数据（真实踩过的坑，见 <code>docs/CHANGELOG.md</code>）。<span class="fk">紫色</span>标记的是外键列（<code>references().inTable()</code> 声明的引用关系，SQLite 默认不强制校验，纯靠约定）。
+    </p>
+    <div class="schema-grid">
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_episode</code><span class="note">被分析的短剧单集</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td>title</td><td>text</td><td>标题</td></tr>
+          <tr><td>sourceFilePath</td><td>text</td><td>上传的原始视频文件路径</td></tr>
+          <tr><td>durationMs</td><td>integer</td><td>时长，分析阶段用 ffprobe 探测后回填</td></tr>
+          <tr><td>status</td><td>text</td><td>uploaded / analyzing / analyzed / failed</td></tr>
+          <tr><td>errorReason</td><td>text</td><td>失败原因</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间（ms 时间戳）</td></tr>
+          <tr><td>episodeAnalysis</td><td>text</td><td>StoryboardAgent 产出，JSON 字符串（见下方 JSON 字段表）</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_ad</code><span class="note">广告素材</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td>name</td><td>text</td><td>素材名称</td></tr>
+          <tr><td>sourceFilePath</td><td>text</td><td>视频/图片素材文件路径，文案素材为空</td></tr>
+          <tr><td>adType</td><td>text</td><td>video / image / copy</td></tr>
+          <tr><td>brandName</td><td>text</td><td>品牌名</td></tr>
+          <tr><td>status</td><td>text</td><td>uploaded / analyzing / analyzed / failed</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+          <tr><td>analysisResult</td><td>text</td><td>AdLibraryAgent 产出，JSON 字符串（AdEntry）</td></tr>
+          <tr><td>textContent</td><td>text</td><td>文案素材原文（adType=copy 时用）</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_creativePlan</code><span class="note">创意方案</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td class="fk">episodeId</td><td>integer</td><td>外键 → ab_episode.id</td></tr>
+          <tr><td class="fk">adId</td><td>integer</td><td>外键 → ab_ad.id</td></tr>
+          <tr><td>narrative</td><td>text</td><td>创意构思（叙事衔接）</td></tr>
+          <tr><td>tone</td><td>text</td><td>情绪基调</td></tr>
+          <tr><td>planEvaluatorScore</td><td>integer</td><td>PlanEvaluator 综合参考分</td></tr>
+          <tr><td>status</td><td>text</td><td>draft / evaluating / approved / rejected</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+          <tr><td>imageModelKey</td><td>text</td><td>用户选定的图片模型，null 走系统默认</td></tr>
+          <tr><td>videoModelKey</td><td>text</td><td>用户选定的视频模型，null 走系统默认</td></tr>
+          <tr><td>videoResolution</td><td>text</td><td>用户选定的成片分辨率，null 走系统默认</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_bridgeCut</code><span class="note">分镜草案/桥接段</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td class="fk">creativePlanId</td><td>integer</td><td>外键 → ab_creativePlan.id</td></tr>
+          <tr><td>index</td><td>integer</td><td>方案内的顺序号</td></tr>
+          <tr><td>type</td><td>text</td><td>video / playableGame（ctaCard 是 M2-M6 历史值，M7 起不再生成）</td></tr>
+          <tr><td>scriptText</td><td>text</td><td>JSON 字符串，形状随 type 变化（见下方 JSON 字段表）</td></tr>
+          <tr><td>durationMs</td><td>integer</td><td>成片实际时长</td></tr>
+          <tr><td>prompt</td><td>text</td><td>组装后喂给生成模型的最终 prompt</td></tr>
+          <tr><td>status</td><td>text</td><td>draft / draftConfirmed / rendering / done / failed / generating</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_generatedSegment</code><span class="note">每次生成产出的版本记录</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td class="fk">bridgeCutId</td><td>integer</td><td>外键 → ab_bridgeCut.id</td></tr>
+          <tr><td>model</td><td>text</td><td>实际用的模型 key</td></tr>
+          <tr><td>filePath</td><td>text</td><td>OSS 相对路径（图片/视频文件或游戏包目录）</td></tr>
+          <tr><td>state</td><td>text</td><td>pending / generating / done / failed</td></tr>
+          <tr><td>errorReason</td><td>text</td><td>失败原因</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+          <tr><td>stage</td><td>text</td><td>draftImage / finalRender——同一 cut 每次重新生成都是新插入一行，不覆盖旧行</td></tr>
+          <tr><td>isSelected</td><td>integer</td><td>0/1，同 cut+stage 下当前生效的那一条，重新生成时旧行统一清 0</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_manifest</code><span class="note">最终交付物</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td class="fk">episodeId</td><td>integer</td><td>外键 → ab_episode.id</td></tr>
+          <tr><td class="fk">creativePlanId</td><td>integer</td><td>外键 → ab_creativePlan.id</td></tr>
+          <tr><td>finalFilePath</td><td>text</td><td>OSS 相对路径</td></tr>
+          <tr><td>manifestJson</td><td>text</td><td>JSON 字符串（见下方 JSON 字段表）</td></tr>
+          <tr><td>status</td><td>text</td><td>done</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_reviseHistory</code><span class="note">revise 前后状态记录</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键</td></tr>
+          <tr><td>targetType</td><td>text</td><td>plan / bridgeCutDraft / bridgeCutMotion / playable / customGame</td></tr>
+          <tr><td>targetId</td><td>integer</td><td>plan→planId，其余→bridgeCutId；不建外键（指向两张不同的表）</td></tr>
+          <tr><td>feedback</td><td>text</td><td>用户原始反馈文本</td></tr>
+          <tr><td>beforeState</td><td>text</td><td>JSON 字符串，revise 前的对象</td></tr>
+          <tr><td>afterState</td><td>text</td><td>JSON 字符串，revise 后的对象</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+        </table>
+      </div>
+
+      <div class="schema-card">
+        <div class="schema-title"><code>ab_chatEvent</code><span class="note">聊天记录持久化</span></div>
+        <table>
+          <tr><td>id</td><td>increments</td><td>主键，按顺序回放依据这个排序</td></tr>
+          <tr><td class="fk">episodeId</td><td>integer</td><td>外键 → ab_episode.id</td></tr>
+          <tr><td>eventType</td><td>text</td><td>message / message:update / content:add / content:update</td></tr>
+          <tr><td>payload</td><td>text</td><td>JSON 字符串，和 socket.emit 发给前端的原始事件一模一样</td></tr>
+          <tr><td>createTime</td><td>integer</td><td>创建时间</td></tr>
+        </table>
+      </div>
+
+    </div>
+
+    <p class="subhead">JSON blob 字段怎么存的</p>
+    <p class="subhead-note">
+      这是这套表结构最核心的设计取舍：结构化程度高、有下游要按字段查询/筛选需求的（id、状态、外键、时间戳）用真实列；
+      内容本身是"一整份复杂对象、只会被整份读出整份替换、不会按内部字段做 SQL 查询"的，直接 <code>JSON.stringify</code> 存进一个 <code>text</code> 列，读的时候 <code>JSON.parse</code> 回来。
+      这样每个 Agent 之间与其说是"共享数据库表结构"，不如说是"共享一个 id，下游拿着 id 查表、自己把 JSON 解析回对应的 TS 类型"——类型本身只在 Zod schema/TS interface 里定义，数据库层面完全不知道这些 JSON 里有什么字段。
+    </p>
+    <div class="table-scroll">
+      <table class="json-table">
+        <tr><th>字段</th><th>存的是什么类型</th><th>说明</th></tr>
+        <tr><td>ab_episode.episodeAnalysis</td><td>EpisodeAnalysis</td><td>storyboardAgent/schema.ts 的 episodeAnalysisSchema + 代码补的 tileCandidates</td></tr>
+        <tr><td>ab_ad.analysisResult</td><td>AdEntry</td><td>adLibraryAgent/schema.ts 的 adAnalysisSchema + 代码补的 id/sourceType/hasVisualAsset/tileCandidates</td></tr>
+        <tr><td>ab_bridgeCut.scriptText</td><td>StageADraft | PlayableConfig | GameSpec</td><td>形状随 cut.type 和生成路径变化：video → StageADraft；playableGame 默认翻牌配对 → PlayableConfig；自定义玩法 → GameSpec。区分默认翻牌配对和自定义生成不是靠额外字段，是运行时 <code>JSON.parse</code> 后探测有没有 <code>gameType</code> 字段</td></tr>
+        <tr><td>ab_manifest.manifestJson</td><td>{ version, bridgeCutId, type, deliverable, supervision, assets, createdAt }</td><td>assembler/index.ts 里手工拼的对象，deliverable 里是 { filePath, url, kind }，supervision 是 SupervisorAgent 的完整输出</td></tr>
+        <tr><td>ab_reviseHistory.beforeState / afterState</td><td>任意，随 targetType 变化</td><td>调用 recordRevise() 时把内存里已有的旧/新对象原样 JSON.stringify，不重新查库</td></tr>
+        <tr><td>ab_chatEvent.payload</td><td>ResTool 四类协议事件各自的 payload</td><td>和 src/socket/chatMessagesData.d.ts 定义的类型一一对应，前端按 eventType 分发给对应 handler 重放</td></tr>
+        <tr><td>o_vendorConfig.inputValues / models</td><td>供应商配置</td><td>inputValues 是 API key 等输入项的 JSON，models 是该供应商支持的模型列表 JSON——框架表，不是本项目业务数据</td></tr>
+      </table>
+    </div>
+
+    <p class="subhead">框架表（模板自带，和本项目业务逻辑无关）</p>
+    <p class="subhead-note">
+      同一个数据库文件里还有这些表，是这个 Agent 项目脚手架自带的通用基础设施（用户认证、供应商/模型配置、任务追踪、Skill 索引、长期记忆），不是 contextual-ad-agent 这个业务的一部分，本文档正文 10 步都不会读写它们（<code>o_vendorConfig</code> 和 <code>o_tasks</code> 除外——图片/视频生成会经过 <code>u.Ai.*</code> 间接读供应商配置、写任务记录，但都是框架代码自动做的，业务 Agent 代码不直接碰这两张表）。
+    </p>
+    <div class="fw-grid">
+      <div class="fw-card"><code>o_user</code><p>登录账号（这个项目单用户，种子数据是 admin/admin123）</p></div>
+      <div class="fw-card"><code>o_setting</code><p>key-value 系统设置（记忆压缩阈值、RAG 参数等）</p></div>
+      <div class="fw-card"><code>o_agentDeploy</code><p>Agent 模型部署配置——这个项目还没用上真正的 taxonomy，模型 key 都是字面量字符串</p></div>
+      <div class="fw-card"><code>o_tasks</code><p>任务中心：每次 u.Ai.* 调用留痕（taskClass/relatedObjects/耗时/状态），本文档各步骤详情卡片里的 taskClass 就是写在这张表里</p></div>
+      <div class="fw-card"><code>o_vendorConfig</code><p>供应商配置（API key、启用状态），.env 启动时同步进这张表</p></div>
+      <div class="fw-card"><code>o_prompt</code> / <code>o_modelPrompt</code><p>通用提示词管理，这个项目没往里填业务数据（用的是 data/skills/*.md 文件而不是这两张表）</p></div>
+      <div class="fw-card"><code>o_skillList</code> / <code>o_skillAttribution</code><p>Skill 文件索引和归属关系，服务框架自身的 Skill 管理功能</p></div>
+      <div class="fw-card"><code>memories</code><p>长期记忆（原始消息 + 压缩摘要），这个项目的聊天历史走的是自建的 ab_chatEvent，不是这张通用记忆表</p></div>
     </div>
   </section>
 
