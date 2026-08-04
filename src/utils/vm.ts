@@ -33,6 +33,7 @@ export default function runCode(code: string, vendor?: Record<string, any>) {
     urlToBase64,
     mergeImages,
     pollTask,
+    delay,
     fetch: fetch,
     Response: Response,
     AbortSignal: AbortSignal,
@@ -87,6 +88,13 @@ export async function urlToBase64(url: string): Promise<string> {
   const mime = res.headers["content-type"] || "image/jpeg";
   const b64 = Buffer.from(res.data).toString("base64");
   return `data:${mime};base64,${b64}`;
+}
+
+// vm2 沙盒里没有暴露原生 setTimeout（sandbox 对象是显式白名单，不是继承宿主全局），
+// vendor 脚本里直接写 setTimeout 会报 "setTimeout is not defined"——真实报错验证过。
+// 这个函数本身跑在宿主 Node 环境（闭包捕获的是外层真实作用域），注入进沙盒当普通函数调用即可。
+export async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function pollTask(

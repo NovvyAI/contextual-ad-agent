@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-03 修复 vendor 沙盒里 setTimeout 未定义导致 Veo 续接直接报错
+
+**用户意见 / 触发原因**：上一条 Veo 续接时序修复刚上线，用户点重试就报错"setTimeout is not defined"（cut 74）。
+
+**改了什么**：`data/vendor/*.ts` 这类 vendor 脚本是通过 `src/utils/vm.ts` 的 `runCode` 跑在 vm2 沙盒里的，沙盒的 `sandbox` 对象是显式白名单（只注入了 `fetch`/`axios`/`pollTask` 等挑出来的能力），不是继承宿主的全局对象，所以沙盒代码里直接写原生 `setTimeout` 会报未定义——续接延迟那行 `await new Promise((resolve) => setTimeout(resolve, 20000))` 就是这么栽的，本地类型检查测不出这种沙盒运行时才暴露的问题。参照项目里已有的 `pollTask` 同款模式（宿主定义、注入沙盒当全局函数用），在 `vm.ts` 新增 `delay(ms)` 辅助函数并加进 `sandbox`；`google.ts` 顶部按 `pollTask` 同款写法加一行 `declare const delay`，续接延迟改成 `await delay(20000)`。
+
+**验证**：`npx tsc --noEmit -p .`、独立类型检查 `data/vendor/google.ts` 均 clean。写了一个最小复现脚本，通过 `runCode` 在真实的 vm2 沙盒里跑一段调用 `delay(500)` 的代码，确认能正确 resolve（计时约 500ms），不再报 `setTimeout is not defined`。检查 cut 74 当前数据库状态：`status="failed"`，`ab_generatedSegment` 里只有 Stage A 的草案图，没有任何 finalRender 产物——两次失败（音频审核拦截 + 这次的 setTimeout 报错）都发生在拿到最终视频之前，没有真实数据需要恢复，用户现在可以直接重试。
+
+---
+
 ## 2026-08-03 只给 Veo 加"禁止出现文字"约束，避免它幻觉出乱码字幕
 
 **用户意见 / 触发原因**：用户反馈成片渲染完之后字幕是乱码。排查确认是 Veo（cut 72）在没有任何文字指令的情况下，自己幻觉出模仿短剧硬字幕风格的对白文字——因为不是真实字符串、只是扩散模型在"画"文字纹理，中文渲染出来基本都是不成句的乱码。对比同期一个 Seedance 渲染的 cut（66），画面里也有清晰文字，但那是草案图本身就带了真实的游戏截图内容（按钮、进度条文案），模型只是原样保留已有像素，不是凭空生成，所以是清晰的。用户看完分析后明确要求：**只给 Veo 加限制，Seedance 要保留字幕**（因为 Seedance 这条路径的"字幕"其实是有意义的真实素材文字，不是幻觉产物，加了限制反而会误伤）。
