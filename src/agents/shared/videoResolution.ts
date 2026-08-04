@@ -1,10 +1,13 @@
 import u from "@/utils";
 
 /**
- * 成片分辨率的可选项——和 imageModel.ts/videoModel.ts 是同一个思路。只给两个视频供应商都支持的
+ * 成片分辨率的可选项——和 imageModel.ts/videoModel.ts 是同一个思路。只给 Seedance/Veo 都支持的
  * 交集（Seedance 支持 480p/720p/1080p，Veo 支持 720p/1080p/4K），不放 480p/4K 这种只有一边支持
  * 的档位，避免"选了 Veo 却调了 Seedance 独有的分辨率"这类无效组合——不做成"下拉框选项跟着视频模型
  * 联动变化"这种更复杂的交互，简单直接更不容易出错。
+ * Kling v3 Omni 加入后打破了这个交集（它官方只到 720p，没有 1080p）——没有再把下拉框缩到只剩
+ * 720p 这一个选项（会连累 Seedance/Veo 用户），选择让 imarouter.ts 在请求 Kling 时把 1080p
+ * 静默 clamp 成 720p（和时长早就有的 clampDuration 是同一个思路），下拉框本身维持不变。
  */
 export const VIDEO_RESOLUTION_OPTIONS = [
   { key: "1080p", label: "1080p" },
