@@ -12,6 +12,26 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-05 会话页面调用时间轴改成正序（最早的调用在最上面）
+
+**用户意见 / 触发原因**：“会话页面调用时间轴为什么是倒序的，可以正序么”。原来 `TaskTimelinePanel.vue` 特意 `.reverse()` 成最新调用在最上面（仿照独立监控页面点开详情那种"最近发生的先看到"的习惯），用户希望反过来，最早的调用在最上面、按发生顺序往下读。
+
+**改了什么**：`TaskTimelinePanel.vue` 去掉 `reversedLog` 这个 `.reverse()` 过的 computed，直接用 `taskLog` 本身渲染——`taskLog` 天生就是按时间顺序的（历史记录 `loadTaskLog()` 按 `startTime asc` 查出来，实时记录用 `push` 接在后面），不需要额外排序，删掉反而更简单。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 打开 episode 51 的会话页面，确认时间轴从上到下依次是 `Episode 分析 → 创意方案生成（多条）→ 分镜草案生成`，和管线实际推进顺序一致。
+
+---
+
+## 2026-08-05 会话页面调用时间轴补上历史记录（不再只有打开页面之后的实时调用）
+
+**用户意见 / 触发原因**：“为什么在会话监控里，可以看到 storyboard-analysis claude-opus-4-8 Episode 分析 Episode 51 分析 94.3s，但是 episodes 会话的调用时间轴里不显示这个”。
+
+**改了什么**：根因是 `TaskTimelinePanel.vue` 的数据完全来自 `taskLog`，而 `taskLog` 只在 `sessionAgent.ts` store 里被 `task:start`/`task:done` 这两个实时 socket 事件填充——纯内存态，从来没有一个"打开页面时先拉一次历史"的步骤。`storyboard-analysis`（Episode 分析）通常是在 Episode 列表页点"开始分析"触发的，早于用户打开这一集的会话聊天页面，等真正连上 `sessionAgent` 的 socket 时这条调用早就跑完了，不会再有实时事件补发一次，所以永远看不到。独立监控页面之所以能看到，是因为它点开某个 session 的详情时会专门调一次 `/api/monitor/getSessionTasks` 查完整历史。修法：`sessionAgent.ts` store 新增 `loadTaskLog()`，复用同一个 `/api/monitor/getSessionTasks` 接口（不用新开接口），`SessionView.vue` 挂载时和 `loadSessionState()` 一起、在 `connect()` 之前跑完（和聊天历史回放要先于实时消息到达是同一个道理，避免历史记录和实时记录交错出重复/乱序）；`task:start` 的实时处理器加了一个按 `id` 去重的判断，防止历史记录和实时事件在极小的时间窗口内撞上同一条任务时被重复渲染两遍。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 打开 episode 51 的会话页面，确认调用时间轴最下面（最早）出现了 `94.3s claude-opus-4-8 Episode 分析 Episode 51 分析`，和独立监控页面看到的完全一致。
+
+---
+
 ## 2026-08-05 会话页面：调用时间轴搬到右侧，点开能看每次调用的真实输入输出
 
 **用户意见 / 触发原因**：“在episodes会话里面，到哪一步了仍然在上面，但是调用大模型的时间轴能不能放在会话的右边，形成一种时间轴的感觉。然后每次调用大模型的输入输出也要显示一下是什么。” 两个要求：① 8 步进度条留在原位，调用记录从进度条下面挪到聊天区右侧，做成真正的时间轴样式；② 每条记录点开要看到这次调用大模型时真实的输入和输出，不是只有"耗时/模型/描述"。

@@ -100,6 +100,9 @@ function makeSessionAgentStore(episodeId: number) {
       (socket) => {
         if (!socket) return;
         socket.on("task:start", (event: any) => {
+          // loadTaskLog() 已经拉过一次历史记录，如果这条任务在拉取和 socket 连上之间的窗口期已经开始
+          // （历史记录里已经有了），这里不能再无脑 push 一遍，不然时间轴会看到两条一样的记录
+          if (taskLog.value.some((t) => t.id === event.id)) return;
           taskLog.value.push({
             id: event.id,
             taskClass: event.taskClass,
@@ -131,6 +134,30 @@ function makeSessionAgentStore(episodeId: number) {
         if (sessionState.value) sessionState.value.progress = res.data;
       } catch {
         // 进度刷新失败不影响主流程，静默跳过，下次事件来了会再试
+      }
+    }
+
+    // 调用时间轴需要的是这个 episode 从头到尾的完整调用历史，不只是"打开页面之后新发生的"——
+    // 复用独立监控页面已经有的 /api/monitor/getSessionTasks（按 projectId=episodeId 查 o_tasks，
+    // 附带算好的 stage），不用再新开一个接口。像 storyboard-analysis 这种在打开会话页面之前
+    // 就已经跑完的调用（比如在 Episode 列表页点"开始分析"触发的），不补这一步就永远不会出现在时间轴里。
+    async function loadTaskLog() {
+      try {
+        const res = (await http.post("/api/monitor/getSessionTasks", { episodeId })) as any;
+        taskLog.value = (res.data ?? []).map((r: any) => ({
+          id: r.id,
+          taskClass: r.taskClass,
+          stage: r.stage,
+          describe: r.describe,
+          model: r.model,
+          startTime: r.startTime,
+          durationMs: r.durationMs,
+          state: r.state === "已完成" ? "done" : r.state === "生成失败" ? "failed" : "running",
+          input: r.input,
+          output: r.output,
+        }));
+      } catch {
+        // 历史调用记录加载失败不影响主流程，静默跳过，之后的实时记录还是能正常显示
       }
     }
 
@@ -181,6 +208,7 @@ function makeSessionAgentStore(episodeId: number) {
       loadingSessionState,
       loadSessionState,
       taskLog,
+      loadTaskLog,
       generatePlan,
       approvePlan,
       generateBridgeCuts,
