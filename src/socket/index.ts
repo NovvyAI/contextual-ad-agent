@@ -1,7 +1,8 @@
 import { Server } from "socket.io";
 import sessionAgent from "./routes/sessionAgent";
+import monitor from "./routes/monitor";
 
-const routes: Record<string, (nsp: ReturnType<Server["of"]>) => void> = { sessionAgent };
+const routes: Record<string, (nsp: ReturnType<Server["of"]>) => void> = { sessionAgent, monitor };
 
 export default (io: Server) => {
   for (const [name, handler] of Object.entries(routes)) {

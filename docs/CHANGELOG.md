@@ -12,6 +12,21 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-04 自建会话观测系统：每个会话页面实时进度条 + 独立全量监控页面
+
+**用户意见 / 触发原因**：用户想知道每个会话（episode）现在跑到哪一步、每次调用大模型花了多长时间。问过是否用 MLflow，用户明确要求不接现成的 MLflow，自己做一个轻量版。设计确认（"好的 就先这样设计"）后要求两处都要：① 每个会话页面自己嵌一个进度条+调用记录；② 另外一个能看所有 session 的独立监控页面，且都要真正实时推送，不是刷新才更新。定稿之后用户又提出，光看"做了什么、等了多久"不够，每条调用记录还要明确写出**调用了哪个大模型**，以及**属于 8 步里的哪一步**（例如"7.0s claude-opus-4-8 游戏组装 Cut 79 配对素材图 4"这种格式）。
+
+**改了什么**：
+- 不用真实 MLflow，全部自建：`src/utils/taskEvents.ts` 是个全局 `EventEmitter`，`taskRecord.ts`（被到处调用的底层任务记录工具）在任务开始/结束时各 emit 一次事件，不直接碰 Socket 实例——谁想听自己订阅，`taskRecord.ts` 不需要知道监听方是谁。
+- `src/agents/shared/sessionProgress.ts` 的 `computeSessionProgress(episodeId)`：综合 `ab_episode`/`ab_creativePlan`/`ab_bridgeCut`/`ab_manifest` 的状态列 + `o_tasks` 里 `taskClass=supervision` 的最新记录（落地终审没有独立状态列，只能反推），算出 8 个固定阶段（Episode 分析→创意方案生成→分镜草案生成→确认全部分镜草案→成片渲染→游戏组装→落地终审→最终交付物组装）里现在处于哪一步，这个函数是唯一定义"8 步分别是什么"的地方，会话面板/独立监控页面共用。
+- 会话页面（`SessionProgressPanel.vue`）：`t-steps` 进度条 + 最近调用记录列表，通过一个新的、按 `episodeId` 过滤转发 `taskEvents` 的 socket 通道（`src/socket/routes/sessionAgent.ts` 新增 `task:start`/`task:done` 转发）实时推送，刷新页面也不丢（`getSessionState.ts` 返回值带上 `computeSessionProgress` 算出的当前进度）。
+- 独立监控页面（`data/monitor/index.html`，纯静态 vanilla JS，挂在 `/monitor` 路径，复用主应用登录态）：全部 session 列表 + 点开看某个 session 的完整调用时间线，走一个不按 `episodeId` 过滤、全量广播的新 socket 命名空间（`src/socket/routes/monitor.ts`）。
+- 每条调用记录展示"调用了哪个大模型"+"属于哪一步"：`model` 字段本来就在 `o_tasks`/`TaskStartEvent` 里，只是两处 UI 都没渲染出来，补上 `<span>` + 对应 CSS；"属于哪一步"是新加的——`src/agents/shared/taskStageLabel.ts` 提供纯函数 `stageLabelForTaskClass(taskClass)`，按 `taskClass` 前缀（`videoGen-stageA-*`→分镜草案生成、`playable-*`→游戏组装 等）映射到和 `sessionProgress.ts` 8 步同名的中文 label，不落库、不需要迁移，`taskRecord.ts` 发 `task:start` 事件时算一次带上（两边 UI 都拿到），独立监控页面的历史查询接口 `getSessionTasks.ts` 读 `o_tasks` 时也临时算一次附上。这个函数特意不放进 `sessionProgress.ts`（那个文件 import 了 `@/utils` 聚合对象，而 `taskRecord.ts` 又被 `@/utils` 间接引用，两边互相 import 会循环）。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。用 Claude in Chrome 全程真实浏览器验证，不是只看代码：在一个测试 episode 上真实点击"确认组装小游戏"、发送一条 revise 反馈，触发真实的 PlayableAgent 调用，确认会话页面进度条和独立监控页面都实时（不刷新）弹出新的调用记录，格式确认是 `进行中/耗时 + 模型名 + 所属阶段 + 描述`（比如 `进行中 claude-opus-4-8 游戏组装 Cut 79 小游戏配置 revise`），和监控页面点开某个历史 session 的调用时间线格式一致。重启服务后两处也都用真实浏览器重新验证过一遍（重启后旧的 socket 连接需要硬刷新页面才能重连，不是这次改动引入的问题，是这套系统本来就有的已知行为）。
+
+---
+
 ## 2026-08-04 新增 Vidu Q3 Turbo 作为第五个可选视频模型（走 ImaRouter 中转）
 
 **用户意见 / 触发原因**：延续 MiniMax 那次的做法，用户直接给了 ImaRouter 官方文档链接（`https://doc.imarouter.com/#en/tag/vidu-video/POST/v1/video/generations#vidu`），要求先读文档再接入 `viduq3-turbo`。

@@ -36,11 +36,14 @@ export async function analyzeEpisode(episodeId: number): Promise<void> {
 
     const messages = buildEpisodeAnalysisMessages(fullFrames, tailFrames, segments);
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "storyboard_agent.md"), "utf-8");
-    const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject({
-      schema: episodeAnalysisSchema,
-      system: systemPrompt,
-      messages,
-    });
+    const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject(
+      {
+        schema: episodeAnalysisSchema,
+        system: systemPrompt,
+        messages,
+      },
+      { taskClass: "storyboard-analysis", describe: `Episode ${episodeId} 分析`, relatedObjects: String(episodeId), projectId: episodeId },
+    );
 
     // 只匹配 fullFrames（覆盖全片的稀疏采样），不匹配 tailFrames——候选素材要的是"人物/场景长什么样"，
     // tailFrames 只密集采样结尾，前者更适合找有代表性的角色/场景画面

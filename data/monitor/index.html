@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>contextual-ad-agent · 会话监控</title>
+<style>
+  :root {
+    --bg: #0a0f16;
+    --bg-panel: #0f1720;
+    --bg-panel-2: #0d141d;
+    --ink: #dce6ef;
+    --ink-dim: #8ea3b8;
+    --ink-faint: #5b6f83;
+    --rule: #1e2b38;
+    --rule-soft: #16212c;
+    --db: #4a9dd6;
+    --agent: #2dd4bf;
+    --skill: #e0ac4a;
+    --gate: #e0716a;
+    --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+  header { border-bottom: 1px solid var(--rule); padding-bottom: 16px; margin-bottom: 22px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--agent); margin: 0 0 8px; }
+  h1 { font-size: 22px; font-weight: 650; margin: 0; }
+  .conn-status { font-family: var(--mono); font-size: 12px; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--rule); }
+  .conn-status.on { color: var(--agent); border-color: var(--agent); }
+  .conn-status.off { color: var(--gate); border-color: var(--gate); }
+
+  #token-bar { display: none; gap: 8px; align-items: center; background: var(--bg-panel); border: 1px solid var(--gate); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
+  #token-bar input { flex: 1; background: var(--bg-panel-2); border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); padding: 6px 10px; font-family: var(--mono); font-size: 12px; }
+  #token-bar button { background: var(--agent); color: #06201c; border: none; border-radius: 6px; padding: 6px 14px; font-weight: 650; cursor: pointer; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); padding: 10px 14px; border-bottom: 1px solid var(--rule); background: var(--bg-panel-2); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr.session-row { cursor: pointer; transition: background 0.15s; }
+  tr.session-row:hover { background: var(--bg-panel-2); }
+  tr.session-row.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { background: rgba(45, 212, 191, 0.18); } to { background: transparent; } }
+
+  .stage-dots { display: flex; gap: 3px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); flex: none; }
+  .dot.done { background: var(--agent); }
+  .dot.in_progress { background: var(--skill); animation: pulse 1.2s infinite; }
+  .dot.failed { background: var(--gate); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .cur-step { font-size: 12.5px; }
+  .cur-step .label { color: var(--ink); }
+  .cur-step .badge { font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 20px; margin-left: 6px; }
+  .badge.done { background: rgba(45,212,191,0.15); color: var(--agent); }
+  .badge.in_progress { background: rgba(224,172,74,0.15); color: var(--skill); }
+  .badge.failed { background: rgba(224,113,106,0.15); color: var(--gate); }
+  .badge.pending { background: rgba(94,110,128,0.15); color: var(--ink-faint); }
+
+  #detail { display: none; margin-top: 20px; background: var(--bg-panel); border: 1px solid var(--rule); border-radius: 12px; padding: 16px 18px; }
+  #detail h2 { font-size: 15px; margin: 0 0 12px; font-family: var(--mono); }
+  .task-row { display: flex; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--rule-soft); font-size: 12.5px; }
+  .task-row:last-child { border-bottom: none; }
+  .task-row .tclass { font-family: var(--mono); color: var(--db); flex: none; width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-row .model { font-family: var(--mono); color: var(--skill); flex: none; width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-row .stage { font-size: 11px; color: var(--ink-dim); background: var(--bg-panel-2); border-radius: 3px; padding: 1px 6px; flex: none; white-space: nowrap; }
+  .task-row .desc { flex: 1; color: var(--ink-dim); }
+  .task-row .dur { font-family: var(--mono); flex: none; width: 70px; text-align: right; }
+  .task-row.done .dur { color: var(--agent); }
+  .task-row.failed .dur { color: var(--gate); }
+  .task-row.running .dur { color: var(--skill); }
+  .empty { color: var(--ink-faint); font-size: 13px; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <p class="eyebrow">contextual-ad-agent · 内部工具</p>
+      <h1>会话监控 · 全部 Session 实时进度</h1>
+    </div>
+    <span id="conn-status" class="conn-status off">未连接</span>
+  </header>
+
+  <div id="token-bar">
+    <span>没有检测到登录 token（这个页面和主应用共用登录态）——粘贴一个有效 token，或者先在主应用登录一次再刷新这个页面：</span>
+    <input id="token-input" placeholder="token" />
+    <button id="token-save">保存</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Episode</th><th>8 阶段</th><th>当前步骤</th><th>最近活动</th></tr>
+    </thead>
+    <tbody id="session-list"><tr><td colspan="4" class="empty">加载中...</td></tr></tbody>
+  </table>
+
+  <div id="detail">
+    <h2 id="detail-title"></h2>
+    <div id="detail-tasks"></div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function () {
+  const STAGE_LABELS = ["Episode 分析", "创意方案生成", "分镜草案生成", "确认全部分镜草案", "成片渲染", "游戏组装", "落地终审", "最终交付物组装"];
+
+  function getToken() { return localStorage.getItem("token") || ""; }
+  function authHeaders() { return { "Content-Type": "application/json", Authorization: getToken() }; }
+
+  async function apiPost(path, body) {
+    const resp = await fetch(path, { method: "POST", headers: authHeaders(), body: JSON.stringify(body || {}) });
+    if (resp.status === 401) { document.getElementById("token-bar").style.display = "flex"; throw new Error("未登录"); }
+    const json = await resp.json();
+    return json.data;
+  }
+
+  const sessions = new Map(); // episodeId -> session object
+  let openEpisodeId = null;
+  let detailTasks = [];
+
+  function stageBadgeClass(status) { return "badge " + status; }
+  function stageBadgeLabel(status) {
+    return status === "done" ? "已完成" : status === "in_progress" ? "进行中" : status === "failed" ? "失败" : "未开始";
+  }
+
+  function currentStage(progress) {
+    const stages = progress.stages;
+    const idx = stages.findIndex((s) => s.status !== "done");
+    return idx === -1 ? stages[stages.length - 1] : stages[idx];
+  }
+
+  function renderList() {
+    const tbody = document.getElementById("session-list");
+    const rows = [...sessions.values()].sort((a, b) => b.episodeId - a.episodeId);
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">还没有任何 Episode</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows
+      .map((s) => {
+        const cur = currentStage(s.progress);
+        const dots = s.progress.stages
+          .map((st) => `<span class="dot ${st.status}" title="${st.label}: ${stageBadgeLabel(st.status)}"></span>`)
+          .join("");
+        return `<tr class="session-row" data-episode-id="${s.episodeId}">
+          <td>#${s.episodeId} ${s.title || ""}</td>
+          <td><div class="stage-dots">${dots}</div></td>
+          <td class="cur-step"><span class="label">${cur.label}</span><span class="${stageBadgeClass(cur.status)}">${stageBadgeLabel(cur.status)}</span></td>
+          <td>${s.lastActivity || "—"}</td>
+        </tr>`;
+      })
+      .join("");
+    tbody.querySelectorAll("tr.session-row").forEach((row) => {
+      row.addEventListener("click", () => openDetail(Number(row.dataset.episodeId)));
+    });
+  }
+
+  function flashRow(episodeId) {
+    const row = document.querySelector(`tr[data-episode-id="${episodeId}"]`);
+    if (!row) return;
+    row.classList.remove("flash");
+    void row.offsetWidth;
+    row.classList.add("flash");
+  }
+
+  async function refreshSessionProgress(episodeId) {
+    try {
+      const progress = await apiPost("/api/episode/getSessionProgress", { episodeId });
+      const s = sessions.get(episodeId);
+      if (s) { s.progress = progress; renderList(); flashRow(episodeId); }
+    } catch {}
+  }
+
+  function formatDuration(ms) {
+    if (ms == null) return "—";
+    return ms >= 1000 ? (ms / 1000).toFixed(1) + "s" : ms + "ms";
+  }
+
+  function renderDetail() {
+    const container = document.getElementById("detail-tasks");
+    if (detailTasks.length === 0) {
+      container.innerHTML = '<div class="empty">这个 episode 还没有调用记录</div>';
+      return;
+    }
+    container.innerHTML = [...detailTasks]
+      .reverse()
+      .map((t) => {
+        const stateClass = t.state === "running" ? "running" : t.state === "done" ? "done" : "failed";
+        const durText = t.state === "running" ? "进行中" : formatDuration(t.durationMs);
+        return `<div class="task-row ${stateClass}">
+          <span class="tclass">${t.taskClass}</span>
+          <span class="model">${t.model || ""}</span>
+          <span class="stage">${t.stage || ""}</span>
+          <span class="desc">${t.describe || ""}</span>
+          <span class="dur">${durText}</span>
+        </div>`;
+      })
+      .join("");
+  }
+
+  async function openDetail(episodeId) {
+    openEpisodeId = episodeId;
+    const s = sessions.get(episodeId);
+    document.getElementById("detail-title").textContent = `#${episodeId} ${s ? s.title || "" : ""} · 调用时间线`;
+    document.getElementById("detail").style.display = "block";
+    const rows = await apiPost("/api/monitor/getSessionTasks", { episodeId });
+    detailTasks = (rows || []).map((r) => ({
+      id: r.id,
+      taskClass: r.taskClass,
+      model: r.model,
+      stage: r.stage,
+      describe: r.describe,
+      state: r.state === "已完成" ? "done" : r.state === "生成失败" ? "failed" : "running",
+      durationMs: r.durationMs,
+    }));
+    renderDetail();
+  }
+
+  async function loadSessions() {
+    const list = await apiPost("/api/monitor/getSessions");
+    sessions.clear();
+    for (const s of list || []) {
+      sessions.set(s.episodeId, { episodeId: s.episodeId, title: s.title, progress: s.progress, lastActivity: null });
+    }
+    renderList();
+  }
+
+  function setConn(on) {
+    const el = document.getElementById("conn-status");
+    el.textContent = on ? "已连接（实时）" : "未连接";
+    el.className = "conn-status " + (on ? "on" : "off");
+  }
+
+  function connectSocket() {
+    const socket = io("/api/socket/monitor", { transports: ["websocket", "polling"] });
+    socket.on("connect", () => setConn(true));
+    socket.on("disconnect", () => setConn(false));
+
+    socket.on("task:start", (e) => {
+      const s = sessions.get(e.projectId);
+      if (s) { s.lastActivity = `进行中：${e.describe}`; renderList(); flashRow(e.projectId); }
+      if (openEpisodeId === e.projectId) {
+        detailTasks.push({ id: e.id, taskClass: e.taskClass, model: e.model, stage: e.stage, describe: e.describe, state: "running" });
+        renderDetail();
+      }
+    });
+    socket.on("task:done", (e) => {
+      const s = sessions.get(e.projectId);
+      if (s) { s.lastActivity = `${e.state === 1 ? "完成" : "失败"}：${e.taskClass}（${formatDuration(e.durationMs)}）`; }
+      if (openEpisodeId === e.projectId) {
+        const t = detailTasks.find((t) => t.id === e.id);
+        if (t) { t.state = e.state === 1 ? "done" : "failed"; t.durationMs = e.durationMs; }
+        renderDetail();
+      }
+      // task:done 意味着这个 episode 的阶段可能推进了，重新拉一次它的 progress
+      if (e.projectId) refreshSessionProgress(e.projectId);
+    });
+  }
+
+  document.getElementById("token-save").addEventListener("click", () => {
+    const val = document.getElementById("token-input").value.trim();
+    if (val) { localStorage.setItem("token", val); document.getElementById("token-bar").style.display = "none"; init(); }
+  });
+
+  async function init() {
+    try {
+      await loadSessions();
+      connectSocket();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

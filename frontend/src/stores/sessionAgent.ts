@@ -1,9 +1,32 @@
 // Session（=Episode）维度的 store 工厂，每个 episodeId 一个独立 store 实例（Map 缓存），
 // 照抄 Toonflow-web 的 store-per-session 模式（src/stores/scriptAgent.ts）。
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { defineStore } from "pinia";
 import http from "@/utils/http";
 import { useChat } from "@/composables/useChat";
+
+export type StageStatus = "pending" | "in_progress" | "done" | "failed";
+export interface StageProgress {
+  key: string;
+  label: string;
+  status: StageStatus;
+}
+export interface SessionProgress {
+  episodeId: number;
+  stages: StageProgress[];
+}
+
+// 和 src/utils/taskEvents.ts 的 TaskStartEvent/TaskDoneEvent 对应，前端这份只是展示用，不用完全照抄字段
+export interface TaskLogEntry {
+  id: number;
+  taskClass: string;
+  stage: string;
+  describe: string;
+  model: string;
+  startTime: number;
+  durationMs?: number;
+  state: "running" | "done" | "failed";
+}
 
 export interface EpisodeAnalysis {
   plot: string;
@@ -51,12 +74,14 @@ export interface SessionState {
     latestRender: { url: string; filePath: string } | null;
   }[];
   manifest: { id: number; type: string; deliverableUrl: string; ctaUrl?: string } | null;
+  progress: SessionProgress;
 }
 
 function makeSessionAgentStore(episodeId: number) {
   return defineStore(`sessionAgent-${episodeId}`, () => {
     const sessionState = ref<SessionState | null>(null);
     const loadingSessionState = ref(false);
+    const taskLog = ref<TaskLogEntry[]>([]);
 
     const chat = useChat({
       url: "/api/socket/sessionAgent",
@@ -64,6 +89,46 @@ function makeSessionAgentStore(episodeId: number) {
       manageLifecycle: false,
       autoConnect: false,
     });
+
+    // task:start/task:done 是 sessionAgent.ts 按 episodeId 过滤转发的调用事件（见 src/socket/routes/sessionAgent.ts）
+    // chat.socket 是个 shallowRef，connect() 之后才会真正创建 Socket 实例，所以监听器挂在
+    // watch 里、socket 实例出现之后再注册，而不是在 store 初始化时就假设它已经存在
+    watch(
+      chat.socket,
+      (socket) => {
+        if (!socket) return;
+        socket.on("task:start", (event: any) => {
+          taskLog.value.push({
+            id: event.id,
+            taskClass: event.taskClass,
+            stage: event.stage,
+            describe: event.describe,
+            model: event.model,
+            startTime: event.startTime,
+            state: "running",
+          });
+        });
+        socket.on("task:done", (event: any) => {
+          const entry = taskLog.value.find((t) => t.id === event.id);
+          if (entry) {
+            entry.durationMs = event.durationMs;
+            entry.state = event.state === 1 ? "done" : "failed";
+          }
+          // 进度可能推进了一步，只刷新这一小块，不重新拉整份 sessionState（聊天记录等不需要跟着重拉）
+          refreshProgress();
+        });
+      },
+      { immediate: true },
+    );
+
+    async function refreshProgress() {
+      try {
+        const res = (await http.post("/api/episode/getSessionProgress", { episodeId })) as any;
+        if (sessionState.value) sessionState.value.progress = res.data;
+      } catch {
+        // 进度刷新失败不影响主流程，静默跳过，下次事件来了会再试
+      }
+    }
 
     async function loadSessionState() {
       loadingSessionState.value = true;
@@ -111,6 +176,7 @@ function makeSessionAgentStore(episodeId: number) {
       sessionState,
       loadingSessionState,
       loadSessionState,
+      taskLog,
       generatePlan,
       approvePlan,
       generateBridgeCuts,
