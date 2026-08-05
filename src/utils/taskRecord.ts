@@ -1,4 +1,6 @@
 import db from "@/utils/db";
+import taskEvents from "@/utils/taskEvents";
+import { stageLabelForTaskClass } from "@/agents/shared/taskStageLabel";
 
 const taskStateMap = {
   "0": "进行中",
@@ -48,15 +50,18 @@ export default async function taskRecord(
     state: taskStateMap[0],
     startTime,
   });
+  taskEvents.emitStart({ id, projectId, taskClass, stage: stageLabelForTaskClass(taskClass), describe, relatedObjects: opteorContent, model: modelName, startTime });
 
   /** 任务成功时调用 done(1)，失败时调用 done(-1, '原因') */
   return async function done(state: 1 | -1, reason?: string) {
+    const durationMs = Date.now() - startTime;
     await db("o_tasks")
       .where("id", id)
       .update({
         state: taskStateMap[state],
-        durationMs: Date.now() - startTime,
+        durationMs,
         reason: state === -1 ? (reason ?? "") : null,
       });
+    taskEvents.emitDone({ id, projectId, taskClass, state, durationMs, reason });
   };
 }

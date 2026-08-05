@@ -63,17 +63,23 @@ export async function generatePlans(episodeId: number, adIds: number[]): Promise
   const creativePrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_creative.md"), "utf-8");
   const evaluatorPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_evaluator.md"), "utf-8");
 
-  const { object: generation } = await u.Ai.Text(MODEL_KEY).invokeObject({
-    schema: planGenerationSchema,
-    system: creativePrompt,
-    messages: buildPlanGenerationMessages(episodeAnalysis, ads),
-  });
+  const { object: generation } = await u.Ai.Text(MODEL_KEY).invokeObject(
+    {
+      schema: planGenerationSchema,
+      system: creativePrompt,
+      messages: buildPlanGenerationMessages(episodeAnalysis, ads),
+    },
+    { taskClass: "director-generate", describe: `Episode ${episodeId} 创意方案生成`, relatedObjects: String(episodeId), projectId: episodeId },
+  );
 
-  const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject({
-    schema: planEvaluationBatchSchema,
-    system: evaluatorPrompt,
-    messages: buildPlanEvaluationMessages(episodeAnalysis, generation.plans),
-  });
+  const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject(
+    {
+      schema: planEvaluationBatchSchema,
+      system: evaluatorPrompt,
+      messages: buildPlanEvaluationMessages(episodeAnalysis, generation.plans),
+    },
+    { taskClass: "director-evaluate", describe: `Episode ${episodeId} 创意方案评估`, relatedObjects: String(episodeId), projectId: episodeId },
+  );
 
   if (evaluation.evaluations.length !== generation.plans.length) {
     throw new Error("PlanEvaluator 返回的评估数量和方案数量不一致");
@@ -101,17 +107,23 @@ export async function revisePlan(planId: number, feedback: string): Promise<Crea
   const creativePrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_creative.md"), "utf-8");
   const evaluatorPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "director_evaluator.md"), "utf-8");
 
-  const { object: revised } = await u.Ai.Text(MODEL_KEY).invokeObject({
-    schema: planGenerationSchema.shape.plans.element,
-    system: creativePrompt,
-    messages: buildReviseMessages(episodeAnalysis, existingPlan, feedback),
-  });
+  const { object: revised } = await u.Ai.Text(MODEL_KEY).invokeObject(
+    {
+      schema: planGenerationSchema.shape.plans.element,
+      system: creativePrompt,
+      messages: buildReviseMessages(episodeAnalysis, existingPlan, feedback),
+    },
+    { taskClass: "director-revise", describe: `方案 ${planId} revise`, relatedObjects: String(planId), projectId: row.episodeId },
+  );
 
-  const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject({
-    schema: planEvaluationBatchSchema,
-    system: evaluatorPrompt,
-    messages: buildPlanEvaluationMessages(episodeAnalysis, [revised]),
-  });
+  const { object: evaluation } = await u.Ai.Text(MODEL_KEY).invokeObject(
+    {
+      schema: planEvaluationBatchSchema,
+      system: evaluatorPrompt,
+      messages: buildPlanEvaluationMessages(episodeAnalysis, [revised]),
+    },
+    { taskClass: "director-evaluate", describe: `方案 ${planId} revise 评估`, relatedObjects: String(planId), projectId: row.episodeId },
+  );
 
   const { evaluatorFeedback, ...dbRow } = rowFromPlanAndEvaluation(row.episodeId, revised, evaluation.evaluations[0]);
   await u.db("ab_creativePlan").where("id", planId).update(dbRow);

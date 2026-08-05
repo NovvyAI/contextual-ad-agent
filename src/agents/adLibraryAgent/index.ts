@@ -64,11 +64,16 @@ export async function analyzeAd(adId: number): Promise<void> {
     const messages: ModelMessage[] = [{ role: "user", content }];
 
     const systemPrompt = await fs.promises.readFile(path.join(u.getPath("skills"), "ad_library_agent.md"), "utf-8");
-    const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject({
-      schema: adAnalysisSchema,
-      system: systemPrompt,
-      messages,
-    });
+    // 广告分析不挂在具体某个 episode 下（一条广告可能被多个 episode/session 复用），
+    // projectId 用 0 当"不属于任何会话"的哨兵值——真实 episode id 从 1 自增，不会撞上。
+    const { object } = await u.Ai.Text("anthropic:claude-opus-4-8").invokeObject(
+      {
+        schema: adAnalysisSchema,
+        system: systemPrompt,
+        messages,
+      },
+      { taskClass: "ad-analysis", describe: `广告 ${adId} 分析`, relatedObjects: String(adId), projectId: 0 },
+    );
 
     const tileCandidates = (object.tileCandidateFrameIndices ?? [])
       .map((i) => videoFrames.find((f) => f.index === i))

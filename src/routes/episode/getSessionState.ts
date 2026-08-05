@@ -3,6 +3,7 @@ import { z } from "zod";
 import u from "@/utils";
 import { success, error } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
+import { computeSessionProgress } from "@/agents/shared/sessionProgress";
 
 const router = express.Router();
 
@@ -69,6 +70,8 @@ export default router.post(
     const chatEventRows = await u.db("ab_chatEvent").where("episodeId", episodeId).orderBy("id");
     const chatEvents = chatEventRows.map((row: any) => ({ eventType: row.eventType, payload: JSON.parse(row.payload) }));
 
+    const progress = await computeSessionProgress(episodeId);
+
     const manifestRow = await u.db("ab_manifest").where("episodeId", episodeId).orderBy("createTime", "desc").first();
     let manifest: { id: number; type: string; deliverableUrl: string; ctaUrl?: string } | null = null;
     if (manifestRow?.manifestJson && manifestRow.id != null) {
@@ -96,6 +99,7 @@ export default router.post(
         bridgeCuts,
         manifest,
         chatEvents,
+        progress,
       }),
     );
   },

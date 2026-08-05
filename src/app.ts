@@ -155,6 +155,13 @@ export default async function startServe(randomPort: Boolean = false) {
   console.log("文件目录:", assetsDir);
   app.use("/assets", express.static(assetsDir, { acceptRanges: false }));
 
+  // 独立监控页面（内部工具，看所有 session 的进度/大模型调用耗时）——放在认证中间件之前，
+  // 单独一个静态目录，不进 Vue 构建体系；页面自己的 fetch 调用会带上 localStorage 里的 token，
+  // 复用和主应用一样的登录态，不需要单独登录一次
+  const monitorDir = u.getPath("monitor");
+  if (!fs.existsSync(monitorDir)) fs.mkdirSync(monitorDir, { recursive: true });
+  app.use("/monitor", express.static(monitorDir, { acceptRanges: false }));
+
   // data/web 静态网站
   const webDir = u.getPath("web");
   if (fs.existsSync(webDir)) {

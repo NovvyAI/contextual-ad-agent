@@ -7,6 +7,7 @@ import * as videoGenAgent from "@/agents/videoGenAgent";
 import * as actions from "@/agents/sessionAgent/actions";
 import ResTool from "@/socket/resTool";
 import { wrapSocketForPersistence } from "@/socket/persistingSocket";
+import taskEvents from "@/utils/taskEvents";
 
 async function verifyToken(rawToken: string): Promise<boolean> {
   const setting = await u.db("o_setting").where("key", "tokenKey").select("value").first();
@@ -42,6 +43,19 @@ export default (nsp: Namespace) => {
 
     const resTool = new ResTool(wrapSocketForPersistence(socket, episodeId), { episodeId });
     let abortController: AbortController | null = null;
+
+    // 会话进度面板：taskEvents 是全局事件总线（所有 episode 的调用都会 emit），这里按 episodeId
+    // 过滤，只把这个连接对应的会话的调用事件转发给它——独立监控页面走的是另一个不过滤的命名空间
+    const offTaskStart = taskEvents.onStart((event) => {
+      if (event.projectId === episodeId) socket.emit("task:start", event);
+    });
+    const offTaskDone = taskEvents.onDone((event) => {
+      if (event.projectId === episodeId) socket.emit("task:done", event);
+    });
+    socket.on("disconnect", () => {
+      offTaskStart();
+      offTaskDone();
+    });
 
     // plan:generate —— 确定性代码，不经过 LLM。选哪些广告素材参与是多选下拉框操作，不适合聊天触发，保留纯按钮
     socket.on("plan:generate", async (data: { adIds: number[] }) => {
