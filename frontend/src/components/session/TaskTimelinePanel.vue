@@ -2,15 +2,15 @@
 // 会话页面右侧的大模型调用时间轴——从 SessionProgressPanel.vue 拆出来（那边现在只剩顶部的 8 步进度条），
 // 用 TDesign 的 t-timeline 摆在聊天区右边，点开某条记录能看这次调用真实的输入/输出（数据来自
 // src/utils/ai.ts 的 logModelCall 同一份 summarizeForLog 结果，二进制内容已经替换成简短描述）。
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import type { TaskLogEntry } from "@/stores/sessionAgent";
 
 const props = defineProps<{
   taskLog: TaskLogEntry[];
 }>();
 
-// 时间轴最新的调用排在最上面
-const reversedLog = computed(() => [...props.taskLog].reverse());
+// 按发生顺序正序展示（最早的调用在最上面）——taskLog 本身就是按时间顺序追加的
+// （历史记录 loadTaskLog() 按 startTime asc 查出来，实时记录用 push 接在后面），不用再倒过来
 
 const detailVisible = ref(false);
 const detailEntry = ref<TaskLogEntry | null>(null);
@@ -46,10 +46,10 @@ function prettyJson(raw?: string): string {
 <template>
   <div class="task-timeline-panel">
     <div class="panel-title">调用时间轴</div>
-    <div v-if="reversedLog.length === 0" class="empty">还没有调用记录</div>
+    <div v-if="taskLog.length === 0" class="empty">还没有调用记录</div>
     <t-timeline v-else theme="dot" layout="vertical">
       <t-timeline-item
-        v-for="entry in reversedLog"
+        v-for="entry in taskLog"
         :key="entry.id"
         :dot-color="dotColor(entry.state)"
         :label="entry.state === 'running' ? '进行中' : formatDuration(entry.durationMs)"

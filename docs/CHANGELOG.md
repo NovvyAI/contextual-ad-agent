@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-05 会话页面调用时间轴改成正序（最早的调用在最上面）
+
+**用户意见 / 触发原因**：“会话页面调用时间轴为什么是倒序的，可以正序么”。原来 `TaskTimelinePanel.vue` 特意 `.reverse()` 成最新调用在最上面（仿照独立监控页面点开详情那种"最近发生的先看到"的习惯），用户希望反过来，最早的调用在最上面、按发生顺序往下读。
+
+**改了什么**：`TaskTimelinePanel.vue` 去掉 `reversedLog` 这个 `.reverse()` 过的 computed，直接用 `taskLog` 本身渲染——`taskLog` 天生就是按时间顺序的（历史记录 `loadTaskLog()` 按 `startTime asc` 查出来，实时记录用 `push` 接在后面），不需要额外排序，删掉反而更简单。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 打开 episode 51 的会话页面，确认时间轴从上到下依次是 `Episode 分析 → 创意方案生成（多条）→ 分镜草案生成`，和管线实际推进顺序一致。
+
+---
+
 ## 2026-08-05 会话页面调用时间轴补上历史记录（不再只有打开页面之后的实时调用）
 
 **用户意见 / 触发原因**：“为什么在会话监控里，可以看到 storyboard-analysis claude-opus-4-8 Episode 分析 Episode 51 分析 94.3s，但是 episodes 会话的调用时间轴里不显示这个”。
