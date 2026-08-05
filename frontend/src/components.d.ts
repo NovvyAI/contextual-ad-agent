@@ -27,6 +27,7 @@ declare module 'vue' {
     SessionProgressPanel: typeof import('./components/session/SessionProgressPanel.vue')['default']
     StoryboardCutCard: typeof import('./components/chat/content/StoryboardCutCard.vue')['default']
     SupervisorResultCard: typeof import('./components/chat/content/SupervisorResultCard.vue')['default']
+    TaskTimelinePanel: typeof import('./components/session/TaskTimelinePanel.vue')['default']
     TButton: typeof import('tdesign-vue-next')['Button']
     TCard: typeof import('tdesign-vue-next')['Card']
     TCheckbox: typeof import('tdesign-vue-next')['Checkbox']
@@ -46,6 +47,8 @@ declare module 'vue' {
     TTable: typeof import('tdesign-vue-next')['Table']
     TTag: typeof import('tdesign-vue-next')['Tag']
     TTextarea: typeof import('tdesign-vue-next')['Textarea']
+    TTimeline: typeof import('tdesign-vue-next')['Timeline']
+    TTimelineItem: typeof import('tdesign-vue-next')['TimelineItem']
     VideoCandidateCard: typeof import('./components/chat/content/VideoCandidateCard.vue')['default']
   }
 }

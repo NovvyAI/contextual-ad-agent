@@ -8,6 +8,7 @@ import ChatInput from "@/components/chat/ChatInput.vue";
 import ActionBar from "@/components/chat/ActionBar.vue";
 import EpisodeAnalysisPanel from "@/components/session/EpisodeAnalysisPanel.vue";
 import SessionProgressPanel from "@/components/session/SessionProgressPanel.vue";
+import TaskTimelinePanel from "@/components/session/TaskTimelinePanel.vue";
 
 const route = useRoute();
 const episodeId = computed(() => Number(route.params.id));
@@ -53,11 +54,17 @@ function handleSend(text: string) {
       <t-tag v-if="!store.connected" theme="warning" variant="light" style="margin-left: 8px">未连接</t-tag>
     </div>
 
-    <SessionProgressPanel :progress="store.sessionState?.progress ?? null" :task-log="store.taskLog" />
+    <SessionProgressPanel :progress="store.sessionState?.progress ?? null" />
 
-    <EpisodeAnalysisPanel v-if="store.sessionState?.episode.episodeAnalysis" :analysis="store.sessionState.episode.episodeAnalysis" />
+    <div style="display: flex; flex: 1; min-height: 0">
+      <div style="display: flex; flex-direction: column; flex: 1; min-width: 0">
+        <EpisodeAnalysisPanel v-if="store.sessionState?.episode.episodeAnalysis" :analysis="store.sessionState.episode.episodeAnalysis" />
 
-    <MessageList v-if="store.sessionState" :messages="store.messages" :episode-id="episodeId" />
+        <MessageList v-if="store.sessionState" :messages="store.messages" :episode-id="episodeId" />
+      </div>
+
+      <TaskTimelinePanel :task-log="store.taskLog" />
+    </div>
 
     <ActionBar
       v-if="store.sessionState"

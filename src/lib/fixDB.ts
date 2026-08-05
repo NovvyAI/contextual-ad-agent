@@ -76,6 +76,10 @@ export default async (knex: Knex): Promise<void> => {
   await addColumn("ab_generatedSegment", "stage", "text");
   // M6: 联调验收阶段要做分阶段耗时统计，o_tasks 补一列毫秒级耗时（taskRecord.ts 的 done() 里写入）
   await addColumn("o_tasks", "durationMs", "integer");
+  // 会话观测系统：每条调用记录顺带存一份大模型的输入/输出（ai.ts 的 summarizeForLog 处理过，
+  // 二进制/base64 已经替换成简短描述，不会把整段图片/视频数据落进这两列），会话时间轴点开明细能看
+  await addColumn("o_tasks", "input", "text");
+  await addColumn("o_tasks", "output", "text");
   // 加了删除功能之后才暴露的问题：普通 integer 主键删除后号码会被回收复用，新记录可能撞上刚删掉的
   // 旧记录的 id，导致前端按 id 缓存的会话状态串号、显示已删除数据。这几张业务表全部迁移成 AUTOINCREMENT，
   // 删过的 id 永不复用。builder 要和 initDB.ts 里对应表的最终定义保持一致。

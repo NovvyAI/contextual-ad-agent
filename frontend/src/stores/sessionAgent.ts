@@ -26,6 +26,8 @@ export interface TaskLogEntry {
   startTime: number;
   durationMs?: number;
   state: "running" | "done" | "failed";
+  input?: string;
+  output?: string;
 }
 
 export interface EpisodeAnalysis {
@@ -106,6 +108,7 @@ function makeSessionAgentStore(episodeId: number) {
             model: event.model,
             startTime: event.startTime,
             state: "running",
+            input: event.input,
           });
         });
         socket.on("task:done", (event: any) => {
@@ -113,6 +116,7 @@ function makeSessionAgentStore(episodeId: number) {
           if (entry) {
             entry.durationMs = event.durationMs;
             entry.state = event.state === 1 ? "done" : "failed";
+            entry.output = event.output;
           }
           // 进度可能推进了一步，只刷新这一小块，不重新拉整份 sessionState（聊天记录等不需要跟着重拉）
           refreshProgress();

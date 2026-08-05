@@ -13,6 +13,7 @@ export interface TaskStartEvent {
   describe: string;
   relatedObjects?: string;
   model: string;
+  input?: string;
   startTime: number;
 }
 
@@ -23,6 +24,7 @@ export interface TaskDoneEvent {
   state: 1 | -1;
   durationMs: number;
   reason?: string;
+  output?: string;
 }
 
 class TaskEvents extends EventEmitter {
