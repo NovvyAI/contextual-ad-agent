@@ -113,15 +113,18 @@ async function withTaskRecord<T>(
   describe: string,
   relatedObjects: string,
   projectId: number,
-  fn: (modelName: `${string}:${string}`, think: Boolean, thinkLevel: 0 | 1 | 2 | 3) => Promise<T>,
+  input: any,
+  fn: (modelName: `${string}:${string}`, think: Boolean, thinkLevel: 0 | 1 | 2 | 3) => Promise<{ result: T; output: any }>,
 ): Promise<T> {
   const modelName = await resolveModelName(modelKey);
   const [_, model] = modelName.split(/:(.+)/);
-  const taskRecord = await u.task(projectId, taskClass, model, { describe: describe, content: relatedObjects });
+  // 会话观测系统要在时间轴里展示"输入输出是什么"，这里存的就是 logModelCall 打印到 terminal 的同一份
+  // summarizeForLog 之后的数据——二进制/base64 已经替换成简短描述，不会把整段图片/视频数据落进数据库
+  const taskRecord = await u.task(projectId, taskClass, model, { describe: describe, content: relatedObjects, input: summarizeForLog(input) });
   try {
-    const result = await fn(modelName, false, 0);
+    const { result, output } = await fn(modelName, false, 0);
 
-    taskRecord(1);
+    taskRecord(1, undefined, summarizeForLog(output));
     return result;
   } catch (e) {
     taskRecord(-1, u.error(e).message);
@@ -250,13 +253,21 @@ class AiText {
         ...(config?.maxOutputTokens && { maxOutputTokens: config.maxOutputTokens }),
       } as Parameters<typeof generateObject>[0])) as { object: T } & Record<string, any>;
       logModelCall("Text.invokeObject", modelName, "输出", { object: result.object });
-      return result;
+      return { result, output: { object: result.object } };
     };
 
     if (taskRecord) {
-      return withTaskRecord(this.AiType, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
+      return withTaskRecord(
+        this.AiType,
+        taskRecord.taskClass,
+        taskRecord.describe,
+        taskRecord.relatedObjects,
+        taskRecord.projectId,
+        { system: input.system, messages: input.messages },
+        exec,
+      );
     }
-    return exec();
+    return (await exec()).result;
   }
   async stream(input: Omit<Parameters<typeof streamText>[0], "model">) {
     const config = await getModelConfig(this.AiType);
@@ -334,10 +345,10 @@ class AiImage {
       this.result = await fn(input);
       if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
       logModelCall("Image.run", mn, "输出", { imageResult: this.result });
-      return this;
+      return { result: this, output: { imageResult: this.result } };
     };
     if (taskRecord) {
-      await withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
+      await withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, input, exec);
       return this;
     }
     await exec(modelName);
@@ -385,9 +396,10 @@ class AiVideo {
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
         logModelCall("Video.run", mn, "输出", { videoResult: this.result });
+        return { result: this, output: { videoResult: this.result } };
       };
       if (taskRecord) {
-        await withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
+        await withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, input, exec);
         return this;
       }
       await exec(modelName);
@@ -418,13 +430,15 @@ class AiAudio {
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
         logModelCall("Audio.run", mn, "输出", { audioResult: this.result });
-        return this;
-      } catch (e) {}
+        return { result: this, output: { audioResult: this.result } };
+      } catch (e) {
+        return { result: this, output: undefined };
+      }
     };
     if (taskRecord) {
-      return withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, exec);
+      return withTaskRecord(this.key, taskRecord.taskClass, taskRecord.describe, taskRecord.relatedObjects, taskRecord.projectId, input, exec);
     }
-    return await exec(modelName);
+    return (await exec(modelName)).result;
   }
   async save(path: string) {
     await u.oss.writeFile(path, this.result);

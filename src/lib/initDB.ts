@@ -82,6 +82,8 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("startTime");
         table.integer("durationMs");
         table.text("reason");
+        table.text("input");
+        table.text("output");
         table.primary(["id"]);
         table.unique(["id"]);
       },

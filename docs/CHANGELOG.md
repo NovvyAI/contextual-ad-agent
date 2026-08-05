@@ -12,6 +12,19 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-05 会话页面：调用时间轴搬到右侧，点开能看每次调用的真实输入输出
+
+**用户意见 / 触发原因**：“在episodes会话里面，到哪一步了仍然在上面，但是调用大模型的时间轴能不能放在会话的右边，形成一种时间轴的感觉。然后每次调用大模型的输入输出也要显示一下是什么。” 两个要求：① 8 步进度条留在原位，调用记录从进度条下面挪到聊天区右侧，做成真正的时间轴样式；② 每条记录点开要看到这次调用大模型时真实的输入和输出，不是只有"耗时/模型/描述"。
+
+**改了什么**：
+- 布局：`SessionProgressPanel.vue` 现在只剩 8 步 `t-steps`，调用记录整个搬进新组件 `TaskTimelinePanel.vue`，用 TDesign 的 `t-timeline`（`theme="dot"`，最新的调用在最上面）画在 `SessionView.vue` 聊天区右侧，独立一栏、可竖向滚动，不影响进度条和底部输入框的位置。
+- 输入输出要真的存下来才能点开看，不是只打印在 terminal——`o_tasks` 表新增 `input`/`output` 两个 text 列（`initDB.ts` 建表定义 + `fixDB.ts` 补 `addColumn` 迁移，走的是这个项目一直以来的"没有独立 migration 系统、字段级演进靠 addColumn 幂等迁移"这套）。`src/utils/ai.ts` 的 `withTaskRecord` 现在会把 `logModelCall` 打印到 terminal 那份数据（已经用 `summarizeForLog` 把图片/视频等二进制内容替换成"[图片 base64 数据，约 N 字符]"这类简短描述）同时落进这两列，改动点是 `withTaskRecord` 的 `fn` 参数从直接返回结果改成返回 `{result, output}`，四个会调 `taskRecord` 的调用点（`invokeObject`/`AiImage.run`/`AiVideo.run`/`AiAudio.run`）跟着调整。数据通过 `taskEvents`/socket 实时推给前端（`TaskStartEvent` 带 `input`，`TaskDoneEvent` 带 `output`），和 `model`/`stage` 那两个字段走的是同一条已有管线，不需要另外加接口。
+- `TaskTimelinePanel.vue` 点击某条记录弹 `t-dialog`，`input`/`output` 都是落库时 `JSON.stringify` 过的字符串，展示前 `JSON.parse` 再 pretty-print，不是合法 JSON 就原样显示兜底。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean；重启后 `sqlite3 data/db2.sqlite ".schema o_tasks"` 确认 `input`/`output` 两列真的迁移进去了。Claude in Chrome 真实走一遍：在测试 episode 上用聊天提"游戏难度调整一下"触发一次真实的 `playable-reviseText` 调用，确认时间轴出现在聊天区右侧、新记录实时推上来；点开一条图片生成记录，输入看到完整 `prompt`，输出是 `"[图片 base64 数据，约 975971 字符]"` 而不是真把 97 万字符的 base64 糊出来；点开一条文本生成记录，输入看到完整 `system`/`messages`，输出是结构化的 `{title, ctaUrl, tilePrompts}` 对象，格式化排版正常、可滚动。
+
+---
+
 ## 2026-08-04 会话监控页面搬进主应用，和 Episodes / 创意素材平级
 
 **用户意见 / 触发原因**：独立监控页面（`http://localhost:10588/monitor/`）能用，但要单独开一个页签、还要手动同步登录 token 才方便调试；用户要求把它做成 `http://localhost:5173/` 主应用里的一个新 tab，和现有的 Episodes、创意素材平级。
