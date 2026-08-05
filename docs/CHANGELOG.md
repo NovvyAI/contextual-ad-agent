@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-04 会话监控页面搬进主应用，和 Episodes / 创意素材平级
+
+**用户意见 / 触发原因**：独立监控页面（`http://localhost:10588/monitor/`）能用，但要单独开一个页签、还要手动同步登录 token 才方便调试；用户要求把它做成 `http://localhost:5173/` 主应用里的一个新 tab，和现有的 Episodes、创意素材平级。
+
+**改了什么**：`frontend/src/views/MonitorView.vue`——把 `data/monitor/index.html` 那套逻辑（`t-table` 列表 + 点行看调用时间线）重写成 Vue 组件，数据源和协议完全复用现成后端接口（`/api/monitor/getSessions`、`/api/monitor/getSessionTasks`、`/api/socket/monitor` 广播），不用再单独处理 token（`http.ts` 拦截器已经统一带上）。调用时间线用 `t-dialog` 展示，不像独立页面那样挤在页面下方。路由加 `/monitor`（`router/index.ts`），导航栏（`AppHeader.vue`）加"会话监控"链接。`data/monitor/index.html` 保留不删——纯后端部署、不过 Vite 构建的场景还用得上，两边共用同一套后端接口，谁改了接口字段两边都要跟着改。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 真实点开 `http://localhost:5173/#/monitor`：导航栏"会话监控"高亮、表格渲染出全部 session 及 8 阶段进度点、右上角"已连接（实时）"绿色徽标确认 socket 已连上；点击一行（#48）弹出调用时间线对话框，确认 `taskClass/model/stage/描述/耗时` 五项都正确显示（失败任务的耗时是红色），和独立监控页面此前验证过的格式完全一致。
+
+---
+
 ## 2026-08-04 自建会话观测系统：每个会话页面实时进度条 + 独立全量监控页面
 
 **用户意见 / 触发原因**：用户想知道每个会话（episode）现在跑到哪一步、每次调用大模型花了多长时间。问过是否用 MLflow，用户明确要求不接现成的 MLflow，自己做一个轻量版。设计确认（"好的 就先这样设计"）后要求两处都要：① 每个会话页面自己嵌一个进度条+调用记录；② 另外一个能看所有 session 的独立监控页面，且都要真正实时推送，不是刷新才更新。定稿之后用户又提出，光看"做了什么、等了多久"不够，每条调用记录还要明确写出**调用了哪个大模型**，以及**属于 8 步里的哪一步**（例如"7.0s claude-opus-4-8 游戏组装 Cut 79 配对素材图 4"这种格式）。

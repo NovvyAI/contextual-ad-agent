@@ -36,6 +36,7 @@ declare module 'vue' {
     ThinkingContent: typeof import('./components/chat/content/ThinkingContent.vue')['default']
     TInput: typeof import('tdesign-vue-next')['Input']
     TLink: typeof import('tdesign-vue-next')['Link']
+    TLoading: typeof import('tdesign-vue-next')['Loading']
     TOption: typeof import('tdesign-vue-next')['Option']
     TPopconfirm: typeof import('tdesign-vue-next')['Popconfirm']
     TSelect: typeof import('tdesign-vue-next')['Select']
