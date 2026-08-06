@@ -223,7 +223,9 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("createTime");
         table.text("imageModelKey"); // 用户在内容生成前选定的图片生成模型，null 就是走系统默认
         table.text("videoModelKey"); // 用户在内容生成前选定的视频生成模型，null 就是走系统默认
-        table.text("videoResolution"); // 用户在内容生成前选定的成片分辨率，null 就是走系统默认（1080p）
+        table.text("videoResolution"); // 用户在内容生成前选定的成片分辨率，null 就是走系统默认（720p）
+        table.text("feedback"); // 用户对这份方案的喜欢/不喜欢反馈：like | dislike | null（没点过），留作后续训练数据
+        table.integer("feedbackAt"); // 上一次点击喜欢/不喜欢的时间，没点过是 null
       },
     },
     // 分镜草案（已确认方案内的具体分镜/桥接段）

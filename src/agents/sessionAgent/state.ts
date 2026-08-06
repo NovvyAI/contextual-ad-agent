@@ -15,8 +15,14 @@ async function getEpisodeOrThrow(episodeId: number) {
 
 export async function startPlanning(episodeId: number, adIds: number[]): Promise<CreativePlanWithEvaluation[]> {
   const episode = await getEpisodeOrThrow(episodeId);
-  if (episode.workflowStage !== "uploaded") {
+  // uploaded：第一次生成；plan_review：用户对上一批 2 份方案都不满意，点"重新生成方案"再来一批——
+  // 一旦有方案被 approve，阶段会推进到 content_review，届时这里就不再放行，不会误伤已经在做内容的方案
+  if (episode.workflowStage !== "uploaded" && episode.workflowStage !== "plan_review") {
     throw new Error(`Episode ${episodeId} 当前阶段是 ${episode.workflowStage}，不能重复发起方案生成`);
+  }
+  // 重新生成时，把上一批还没被选中的方案标记为 rejected，避免"待确认"方案越攒越多
+  if (episode.workflowStage === "plan_review") {
+    await u.db("ab_creativePlan").where("episodeId", episodeId).where("status", "draft").update({ status: "rejected" });
   }
   const plans = await generatePlans(episodeId, adIds);
   await u.db("ab_episode").where("id", episodeId).update({ workflowStage: "plan_review" });

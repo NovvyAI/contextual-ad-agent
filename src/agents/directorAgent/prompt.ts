@@ -24,7 +24,7 @@ function formatAdCandidates(ads: AdEntry[]): string {
 export function buildPlanGenerationMessages(episodeAnalysis: EpisodeAnalysis, ads: AdEntry[]): ModelMessage[] {
   const text =
     `${formatEpisodeContext(episodeAnalysis)}\n\n## 候选广告列表\n${formatAdCandidates(ads)}\n\n` +
-    `请针对上面每一条候选广告，各构思一份创意方案（adId 必须严格取自上面列出的广告 id）。`;
+    `请从上面的候选广告中构思恰好 2 份创意方案，供用户并排比较挑选；可以是同一条广告的两种不同角度，也可以分别对应不同广告，自行判断怎样更有价值——但每份方案的 adId 都必须严格取自上面列出的广告 id。`;
   return [{ role: "user", content: text }];
 }
 

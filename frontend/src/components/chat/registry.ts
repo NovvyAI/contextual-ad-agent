@@ -5,6 +5,7 @@ import MarkdownContent from "./content/MarkdownContent.vue";
 import ThinkingContent from "./content/ThinkingContent.vue";
 import GenericContent from "./content/GenericContent.vue";
 import PlanCandidateCard from "./content/PlanCandidateCard.vue";
+import PlanCandidatePairCard from "./content/PlanCandidatePairCard.vue";
 import StoryboardCutCard from "./content/StoryboardCutCard.vue";
 import VideoCandidateCard from "./content/VideoCandidateCard.vue";
 import ContentCandidateCard from "./content/ContentCandidateCard.vue";
@@ -23,6 +24,7 @@ export const contentRegistry: Record<AIMessageContent["type"] | "attachment", Co
   activity: GenericContent,
   reasoning: GenericContent,
   planCandidate: PlanCandidateCard,
+  planCandidatePair: PlanCandidatePairCard,
   storyboardCut: StoryboardCutCard,
   videoCandidate: VideoCandidateCard,
   contentCandidate: ContentCandidateCard,

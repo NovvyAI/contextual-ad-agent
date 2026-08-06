@@ -34,6 +34,13 @@ export type PlanCandidateContent = ChatBaseContent<'planCandidate', {
   planEvaluatorScore: number;
   status: 'draft' | 'approved' | 'rejected';
   evaluatorFeedback?: { narrativeFeasibility: number; gameRelevance: number; adAlignment: number; feedback: string };
+  // 生成时的初始反馈状态（一般是 null，revise 后的卡片可能带上一次点过的值），点击后不会实时改这张卡片，
+  // 只是给初始渲染一个参考值——这条限制和"确认这份方案"按钮点了之后卡片状态也不会实时更新是同一个已知取舍
+  feedback?: 'like' | 'dislike' | null;
+}>;
+// M2: 一次生成恰好 2 份创意方案，供用户并排比较（DirectorAgent.generatePlans 现在固定产出 2 份）
+export type PlanCandidatePairContent = ChatBaseContent<'planCandidatePair', {
+  plans: PlanCandidateContent['data'][];
 }>;
 // M3: VideoGenAgent Stage A 分镜草案卡片（逐张 review，"只重画这一张"revise 的对象）
 export type StoryboardCutContent = ChatBaseContent<'storyboardCut', {
@@ -97,6 +104,7 @@ export type AIMessageContent =
   | ToolCallContent
   | ActivityContent
   | PlanCandidateContent
+  | PlanCandidatePairContent
   | StoryboardCutContent
   | VideoCandidateContent
   | ContentCandidateContent

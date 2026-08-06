@@ -156,6 +156,9 @@ export default async (knex: Knex): Promise<void> => {
   await addColumn("ab_creativePlan", "videoModelKey", "text");
   // 成片分辨率原来硬编码 1080p，现在也让用户选，只给两个视频供应商都支持的档位（720p/1080p）
   await addColumn("ab_creativePlan", "videoResolution", "text");
+  // 创意方案加喜欢/不喜欢反馈按钮，纯打分信号不影响流程，落库留作后续训练数据用
+  await addColumn("ab_creativePlan", "feedback", "text");
+  await addColumn("ab_creativePlan", "feedbackAt", "integer");
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，
   // 读取源码跑一遍沙箱拿到 vendor.id/inputValues，写入一行禁用状态的配置。

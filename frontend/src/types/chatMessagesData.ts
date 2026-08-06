@@ -43,8 +43,12 @@ export type PlanCandidateContent = ChatBaseContent<
     planEvaluatorScore: number;
     status: "draft" | "approved" | "rejected";
     evaluatorFeedback?: { narrativeFeasibility: number; gameRelevance: number; adAlignment: number; feedback: string };
+    // 生成时的初始反馈状态，点击后不会实时改这张卡片本身（和"确认这份方案"按钮同样的已知取舍）
+    feedback?: "like" | "dislike" | null;
   }
 >;
+// M2：一次生成恰好 2 份创意方案，供用户并排比较
+export type PlanCandidatePairContent = ChatBaseContent<"planCandidatePair", { plans: PlanCandidateContent["data"][] }>;
 // M3：VideoGenAgent Stage A 分镜草案卡片
 export type StoryboardCutContent = ChatBaseContent<
   "storyboardCut",
@@ -100,6 +104,7 @@ export type AIMessageContent =
   | ToolCallContent
   | ActivityContent
   | PlanCandidateContent
+  | PlanCandidatePairContent
   | StoryboardCutContent
   | VideoCandidateContent
   | ContentCandidateContent

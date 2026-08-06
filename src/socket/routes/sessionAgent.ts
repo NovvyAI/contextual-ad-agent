@@ -67,10 +67,12 @@ export default (nsp: Namespace) => {
       ackMsg.complete();
 
       try {
+        // DirectorAgent.generatePlans 现在固定产出 2 份方案，一条消息里放两张卡片、并排展示，
+        // 方便用户直接比较，不再是一份方案一条独立消息（那样会在聊天里纵向堆叠）
         const plans = await state.startPlanning(episodeId, data.adIds);
-        for (const plan of plans) {
-          const msg = resTool.newMessage("assistant", "创意总监");
-          msg.planCandidate({
+        const msg = resTool.newMessage("assistant", "创意总监");
+        msg.planCandidatePair({
+          plans: plans.map((plan) => ({
             id: plan.id,
             adId: plan.adId,
             narrative: plan.narrative,
@@ -78,9 +80,9 @@ export default (nsp: Namespace) => {
             planEvaluatorScore: plan.planEvaluatorScore,
             status: plan.status,
             evaluatorFeedback: plan.evaluatorFeedback,
-          });
-          msg.complete();
-        }
+          })),
+        });
+        msg.complete();
       } catch (err) {
         const msg = resTool.newMessage("assistant");
         msg.error(u.error(err).message);
@@ -90,6 +92,22 @@ export default (nsp: Namespace) => {
     // plan:approve —— 按钮点击和聊天说"我选方案X"共用 actions.confirmPlanAction
     socket.on("plan:approve", async (data: { planId: number }) => {
       await actions.confirmPlanAction(resTool, episodeId, data.planId);
+    });
+
+    // plan:feedback —— 喜欢/不喜欢按钮，纯打分反馈不影响流程，不需要聊天触发也不需要回消息，
+    // 静默写库留作以后的训练数据；再点一次同一个按钮相当于取消（前端传 null）
+    socket.on("plan:feedback", async (data: { planId: number; feedback: "like" | "dislike" | null }) => {
+      try {
+        const { planId, feedback } = data;
+        if (feedback !== null && feedback !== "like" && feedback !== "dislike") throw new Error("feedback 取值必须是 like/dislike/null");
+        const plan = await u.db("ab_creativePlan").where("id", planId).first();
+        if (!plan) throw new Error(`创意方案 ${planId} 不存在`);
+        await u.db("ab_creativePlan")
+          .where("id", planId)
+          .update({ feedback, feedbackAt: feedback ? Date.now() : null });
+      } catch (err) {
+        console.error("[sessionAgent] plan:feedback 失败:", u.error(err).message);
+      }
     });
 
     // bridgeCut:generate —— 按钮点击和聊天触发共用 actions.generateContentAction
