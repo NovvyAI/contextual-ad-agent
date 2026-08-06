@@ -7,7 +7,10 @@ export const planDraftSchema = z.object({
 });
 
 export const planGenerationSchema = z.object({
-  plans: z.array(planDraftSchema).describe("针对每条候选广告构思出的创意方案列表，通常一条广告对应一份方案"),
+  plans: z
+    .array(planDraftSchema)
+    .length(2)
+    .describe("固定构思 2 份创意方案，供用户并排比较挑选；不要求覆盖每一条候选广告，可以是同一条广告的不同角度，也可以对应不同广告"),
 });
 
 export const planEvaluationSchema = z.object({

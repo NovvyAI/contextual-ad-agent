@@ -75,6 +75,10 @@ function submitAssemblePlayable() {
   assembleDialogVisible.value = false;
 }
 
+// "重新生成方案"复用上一批用过的广告 id，不用再让用户重新选一遍——sessionState.creativePlans
+// 是这个 episode 下全部方案（不分状态），去重后就是上一次调用 generatePlans 实际传入的 adIds
+const lastPlanAdIds = computed(() => [...new Set(props.sessionState.creativePlans.map((p) => p.adId))]);
+
 const approvedPlan = computed(() => props.sessionState.creativePlans.find((p) => p.status === "approved"));
 // 一个 episode 理论上不该同时有多份 approved 方案，但实际数据里出现过（历史遗留/反复测试导致）——
 // 这里按当前这份 approved 方案过滤 cut，不然混进另一份方案已经 done 的 cut，会把这些按钮状态判断全部打乱
@@ -100,6 +104,7 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
 
     <template v-else-if="sessionState.episode.workflowStage === 'plan_review'">
       <span style="color: var(--td-text-color-secondary, #666)">请在上面的方案卡片里选择并确认一份方案</span>
+      <t-button variant="outline" :disabled="busy" @click="onGeneratePlan(lastPlanAdIds)">重新生成方案</t-button>
     </template>
 
     <template v-else-if="sessionState.episode.workflowStage === 'content_review'">

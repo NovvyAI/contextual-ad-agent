@@ -183,6 +183,9 @@ function makeSessionAgentStore(episodeId: number) {
     function approvePlan(planId: number) {
       chat.socket.value?.emit("plan:approve", { planId });
     }
+    function setPlanFeedback(planId: number, feedback: "like" | "dislike" | null) {
+      chat.socket.value?.emit("plan:feedback", { planId, feedback });
+    }
     function generateBridgeCuts(creativePlanId: number, imageModelKey?: string, videoModelKey?: string, videoResolution?: string) {
       chat.socket.value?.emit("bridgeCut:generate", { creativePlanId, imageModelKey, videoModelKey, videoResolution });
     }
@@ -211,6 +214,7 @@ function makeSessionAgentStore(episodeId: number) {
       loadTaskLog,
       generatePlan,
       approvePlan,
+      setPlanFeedback,
       generateBridgeCuts,
       confirmBridgeCuts,
       assemblePlayableCut,

@@ -22,6 +22,7 @@ declare module 'vue' {
     MarkdownContent: typeof import('./components/chat/content/MarkdownContent.vue')['default']
     MessageList: typeof import('./components/chat/MessageList.vue')['default']
     PlanCandidateCard: typeof import('./components/chat/content/PlanCandidateCard.vue')['default']
+    PlanCandidatePairCard: typeof import('./components/chat/content/PlanCandidatePairCard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SessionProgressPanel: typeof import('./components/session/SessionProgressPanel.vue')['default']

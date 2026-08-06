@@ -12,6 +12,34 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 创意方案生成后加"重新生成方案"按钮
+
+**用户意见 / 触发原因**：“生成方案后，需要添加一个按钮，重新生成方案，就可以再重新生成两个方案了”。上一条改动把生成固定成一次出 2 份，但用户如果两份都不满意，之前完全没有重来一次的入口——`ActionBar.vue` 在 `plan_review` 阶段只有一行提示文字，没有任何按钮；后端 `state.startPlanning` 也硬性只允许 `workflowStage==='uploaded'` 时调用，重复调用会直接报错。
+
+**改了什么**：
+- `state.startPlanning`：放行条件从只认 `uploaded` 改成 `uploaded` 或 `plan_review` 都可以——一旦有方案被 approve，阶段会推进到 `content_review`，这里就不再放行，不会误伤已经进入内容生成的方案。重新生成时顺手把上一批还没被选中的 `draft` 方案标记成 `rejected`，避免"待确认"方案越攒越多；已经在聊天记录里的旧卡片还是冻结快照，不会消失，只是数据库里不再是 `draft` 状态。
+- `ActionBar.vue`：`plan_review` 阶段的提示文字旁边加"重新生成方案"按钮，直接复用已有的 `onGeneratePlan` 回调（和最初生成用的是同一个），传的 `adIds` 从 `sessionState.creativePlans` 里去重取出上一次实际用过的广告 id，不用用户重新选一遍。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。Claude in Chrome 在一个已经生成过 2 份方案（#104/#105）、还没确认任何一份的 episode 上点"重新生成方案"，确认按钮可用、真实触发了一次新的生成；`sqlite3` 查 `ab_creativePlan` 确认 #104/#105 变成了 `rejected`、新出的 #106/#107 是 `draft` 且 `adId` 和上一批一致；聊天界面里旧的两张卡片还留着（历史记录），新的两张紧接着并排出现在下面，"重新生成方案"按钮依然可用，可以再来一轮。
+
+---
+
+## 2026-08-06 创意方案固定一次生成 2 份、并排展示，加喜欢/不喜欢反馈（落库供以后训练）
+
+**用户意见 / 触发原因**：“在生成创意方案的时候，一次生成两个创意方案，两个创意方案并排排列，然后创意方案里要添加喜欢和不喜欢按钮。如果用户点击了喜欢和不喜欢，这个数据要记录在数据库以后可以用来训练”。问清楚两个设计点：① 不管选几条广告素材，固定只生成 2 份方案（不是每条广告各出 2 份）；② 喜欢/不喜欢只是打分反馈，不影响审批流程，用户还是要单独点"确认这份方案"才能推进。
+
+**改了什么**：
+- `DirectorAgent`：`planGenerationSchema` 的 `plans` 数组加 `.length(2)` 强制约束，`buildPlanGenerationMessages` 的指令文案改成"从候选广告里构思恰好 2 份方案"（可以是同一条广告的不同角度，也可以是不同广告），不再是"每条广告各出一份"。
+- 并排展示：新增复合内容类型 `planCandidatePair`（`data: {plans: PlanCandidateContent["data"][]}`），`plan:generate` 的 socket 处理器现在把这一轮生成的 2 份方案放进**同一条消息**、一次性发出去，而不是像以前那样一份方案一条独立消息（那样在聊天里是纵向堆叠）。前端新增 `PlanCandidatePairCard.vue`，用 flex 布局把两张卡片并排摆出来，内部直接复用现成的 `PlanCandidateCard.vue`（含确认按钮），不重复实现卡片内容。
+- 喜欢/不喜欢：`ab_creativePlan` 表新增 `feedback`（`like`/`dislike`/null）和 `feedbackAt`（时间戳）两列（`initDB.ts` 建表 + `fixDB.ts` 的 `addColumn` 迁移，这个项目一直用这套字段级演进机制，没有独立 migration 系统）。新增 socket 事件 `plan:feedback`（和现有 `plan:approve` 同一条 `sessionAgent` socket、同样的鉴权，不需要单独开 REST 接口），点击按钮直接落库，不经过聊天/LLM，静默处理失败（打日志不打断用户）；再点一次同一个按钮相当于取消（传 `null`，清空两列）。`PlanCandidateCard.vue` 加两个按钮，本地维护一份反馈状态做即时视觉反馈（选中态用 `success`/`danger` 主题着色）。
+- 和"确认这份方案"按钮点击后卡片状态不会实时刷新（`draft`→`approved` 只在下次 `loadSessionState()` 才反映）是同一个已知限制——喜欢/不喜欢按钮同样只在当前这次浏览里维持视觉状态，刷新页面后聊天记录里的卡片会回到未选择的样子（数据本身已经落库，不受影响，只是卡片视觉是历史记录的冻结快照）。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。Claude in Chrome 真实创建一个新 episode、跑完分析、选广告生成方案：确认真的固定出了 2 份方案（#102/#103）、在聊天里并排显示；点击 #102"喜欢"、#103"不喜欢"，`sqlite3` 查 `ab_creativePlan` 确认 `feedback`/`feedbackAt` 正确写入；再点一次"喜欢"确认能清空（取消选择）；点 #103"确认这份方案"确认审批流程不受影响，正常推进到"分镜草案生成"阶段。
+
+顺带发现一个和这次改动无关的既有 bug（不在本次修复范围）：`directorAgent/prompt.ts` 的 `formatAdCandidates` 无条件读 `ad.game.name`，如果候选广告是非游戏类素材（比如库里"Lumira Radiance Serum"这条护肤品广告，`analysisResult` 是 `product` 字段不是 `game`），选中它生成方案会直接抛 `Cannot read properties of undefined (reading 'name')`。这个项目的前提是"游戏类广告桥接"，非游戏广告本就不该进候选列表，本次没有修，先记录下来。
+
+---
+
 ## 2026-08-06 成片分辨率默认档位改成 720p（原来是 1080p）
 
 **用户意见 / 触发原因**：一开始报的是"选择视频模型的时候默认解析度不是1080p，而是720p"，排查后（前端 `ActionBar.vue`、后端 `videoResolution.ts` 的默认值、真实浏览器验证）确认代码和实际表现当时都是 1080p，问清楚后用户澄清：不是 bug 报告，是想要反过来——默认改成 720p。

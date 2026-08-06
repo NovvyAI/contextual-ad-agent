@@ -13,6 +13,7 @@ import type {
   ActivityContent,
   ReasoningContent,
   PlanCandidateContent,
+  PlanCandidatePairContent,
   StoryboardCutContent,
   VideoCandidateContent,
   ContentCandidateContent,
@@ -216,6 +217,14 @@ class MessageBuilder {
       content,
     });
 
+    return this;
+  }
+
+  // 添加创意方案候选对（M2 DirectorAgent 一次生成 2 份方案，供并排比较）
+  planCandidatePair(data: PlanCandidatePairContent["data"]) {
+    const contentId = u.uuid();
+    const content: PlanCandidatePairContent = { type: "planCandidatePair", id: contentId, data, status: "complete" };
+    this.socket.emit("content:add", { messageId: this.messageId, content });
     return this;
   }
 
