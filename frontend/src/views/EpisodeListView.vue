@@ -137,6 +137,7 @@ onUnmounted(() => {
       <template #op="{ row }">
         <t-space>
           <t-button v-if="row.status === 'uploaded'" size="small" @click="handleAnalyze(row.id)">开始分析</t-button>
+          <t-button v-if="row.status === 'failed'" size="small" theme="warning" @click="handleAnalyze(row.id)">重新分析</t-button>
           <t-button v-if="row.status === 'analyzed'" size="small" theme="primary" @click="router.push(`/episodes/${row.id}`)">进入会话</t-button>
           <t-popconfirm content="确定删除这个 Episode 吗？关联的创意方案/内容也会一起删除" theme="danger" @confirm="handleDelete(row.id)">
             <t-button size="small" theme="danger" variant="outline">删除</t-button>
