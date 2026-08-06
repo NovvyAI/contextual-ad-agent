@@ -38,7 +38,7 @@ const videoResolutionOptions = [
   { key: "1080p", label: "1080p" },
   { key: "720p", label: "720p" },
 ];
-const selectedVideoResolution = ref(videoResolutionOptions[0].key);
+const selectedVideoResolution = ref("720p");
 const customGameDialogVisible = ref(false);
 const customGameDescription = ref("");
 const customGameSelectedFrames = ref<string[]>([]);

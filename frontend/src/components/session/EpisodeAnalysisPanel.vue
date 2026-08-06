@@ -13,14 +13,14 @@ const intensityTheme: Record<string, "danger" | "warning" | "default"> = { high:
 </script>
 
 <template>
-  <div style="border-bottom: 1px solid var(--td-border-level-2-color, #e7e7e7); padding: 8px 16px">
+  <div style="border-bottom: 1px solid var(--td-border-level-2-color, #e7e7e7); padding: 8px 16px; flex: none; min-height: 0">
     <div style="cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--td-text-color-secondary, #666)" @click="collapsed = !collapsed">
       <b style="color: var(--td-text-color-primary, #000)">剧情分析</b>
       <t-tag v-if="analysis.endingState.cliffhanger" theme="warning" variant="light" size="small">悬念结尾</t-tag>
       <span style="font-size: 13px">{{ collapsed ? "展开" : "收起" }}</span>
     </div>
 
-    <t-space v-if="!collapsed" direction="vertical" style="width: 100%; margin-top: 12px">
+    <t-space v-if="!collapsed" direction="vertical" style="width: 100%; margin-top: 12px; max-height: 40vh; overflow-y: auto; padding-right: 4px">
       <div><b>剧情梗概：</b>{{ analysis.plot }}</div>
 
       <div>

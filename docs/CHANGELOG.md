@@ -12,6 +12,26 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 成片分辨率默认档位改成 720p（原来是 1080p）
+
+**用户意见 / 触发原因**：一开始报的是"选择视频模型的时候默认解析度不是1080p，而是720p"，排查后（前端 `ActionBar.vue`、后端 `videoResolution.ts` 的默认值、真实浏览器验证）确认代码和实际表现当时都是 1080p，问清楚后用户澄清：不是 bug 报告，是想要反过来——默认改成 720p。
+
+**改了什么**：`frontend/src/components/chat/ActionBar.vue` 的 `selectedVideoResolution` 初始值从跟随 `videoResolutionOptions[0].key`（1080p）改成直接写死 `"720p"`，下拉框选项顺序不变（1080p 仍然排在前面，只是不再是默认选中项）。`src/agents/shared/videoResolution.ts` 的 `DEFAULT_VIDEO_RESOLUTION` 同步改成 `"720p"`——这个值是老方案/没选过分辨率时的系统兜底默认，不跟着改的话前端默认 720p 但老数据兜底还是 1080p，两边会不一致。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean。Claude in Chrome 真实打开一个 `content_review` 阶段的会话（episode 53），确认分辨率下拉框在没有任何点击的情况下默认显示"720p"。
+
+---
+
+## 2026-08-06 修复会话页面"剧情分析"展开后文字溢出、盖住下方按钮的 bug
+
+**用户意见 / 触发原因**：“UI上有个bug，会话里面剧情分析展开后，文字会超过对话框”。真实复现（episode 51）：分析内容较长时（人物介绍、逐条情绪曲线等），展开的 `EpisodeAnalysisPanel` 直接盖到了下面"确认分镜草案，开始渲染成片"按钮上。
+
+**改了什么**：根因是两层嵌套 flex 布局里，中间那层（`SessionView.vue` 包 `EpisodeAnalysisPanel`+`MessageList` 的那个 flex 列容器）没有设 `min-height: 0`——flex 子项默认 `min-height: auto`，会按内容自然高度撑开，超出父级 `flex:1` 分配到的高度时不会被裁切，而是原样溢出盖住后面的元素（这里刚好是同一个外层 flex 列里紧跟着的 `ActionBar`/`ChatInput`）。加上 `EpisodeAnalysisPanel.vue` 展开区域本身也没有高度上限，内容一多必然把父容器撑爆。两处一起改：`SessionView.vue` 给这层中间容器补上 `min-height: 0`；`EpisodeAnalysisPanel.vue` 给展开的 `t-space` 加 `max-height: 40vh; overflow-y: auto`，内容超出这个高度就在面板自己内部滚动，不再往外溢出。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 打开 episode 51（分析内容很长的一集）点开"剧情分析"，确认展开区域自己出现滚动条、内容被限制在面板内，下面的消息列表和"确认分镜草案"按钮不再被盖住；滚动面板内部能看到情绪曲线从 0s 一路滚到 127s 的完整内容。
+
+---
+
 ## 2026-08-06 Episode 列表：分析失败后加一个"重新分析"按钮
 
 **用户意见 / 触发原因**：“为什么剧情分析的时候显示failed”。排查 `o_tasks` 发现 episode 54/55 的 `storyboard-analysis` 记录都失败在同一个原因：`Failed after 3 attempts. Last error: Upstream service temporarily unavailable`——`StoryboardAgent.analyzeEpisode` 内部重试 3 次后仍然是模型供应商侧的瞬时不可用，不是这边代码的 bug。但顺带发现一个真实的 UI 缺口：`EpisodeListView.vue` 的"开始分析"按钮只在 `status==='uploaded'` 时才显示，一旦状态变成 `failed` 就再也没有入口重试，只能等人工改数据库；后端 `analyzeEpisode.ts` 其实完全支持从 `failed` 状态重新触发分析（只挡 `analyzing` 状态防止并发重复），纯粹是前端漏了这个按钮。

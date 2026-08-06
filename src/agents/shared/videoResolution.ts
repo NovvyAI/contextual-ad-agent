@@ -16,13 +16,13 @@ export const VIDEO_RESOLUTION_OPTIONS = [
 
 export type VideoResolution = (typeof VIDEO_RESOLUTION_OPTIONS)[number]["key"];
 
-export const DEFAULT_VIDEO_RESOLUTION: VideoResolution = "1080p";
+export const DEFAULT_VIDEO_RESOLUTION: VideoResolution = "720p";
 
 export function isValidVideoResolution(value: string): value is VideoResolution {
   return VIDEO_RESOLUTION_OPTIONS.some((option) => option.key === value);
 }
 
-/** 老数据/没选过的方案没有这一列，回退到系统默认（原来一直硬编码用的 1080p），不强制用户必须选 */
+/** 老数据/没选过的方案没有这一列，回退到系统默认（720p），不强制用户必须选 */
 export async function resolveVideoResolution(creativePlanId: number): Promise<VideoResolution> {
   const plan = await u.db("ab_creativePlan").where("id", creativePlanId).first();
   const value = plan?.videoResolution;
