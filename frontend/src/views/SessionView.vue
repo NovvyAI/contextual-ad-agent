@@ -60,7 +60,7 @@ function handleSend(text: string) {
     <SessionProgressPanel :progress="store.sessionState?.progress ?? null" />
 
     <div style="display: flex; flex: 1; min-height: 0">
-      <div style="display: flex; flex-direction: column; flex: 1; min-width: 0">
+      <div style="display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0">
         <EpisodeAnalysisPanel v-if="store.sessionState?.episode.episodeAnalysis" :analysis="store.sessionState.episode.episodeAnalysis" />
 
         <MessageList v-if="store.sessionState" :messages="store.messages" :episode-id="episodeId" />
