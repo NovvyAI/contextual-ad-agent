@@ -12,6 +12,16 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 Episode 列表：分析失败后加一个"重新分析"按钮
+
+**用户意见 / 触发原因**：“为什么剧情分析的时候显示failed”。排查 `o_tasks` 发现 episode 54/55 的 `storyboard-analysis` 记录都失败在同一个原因：`Failed after 3 attempts. Last error: Upstream service temporarily unavailable`——`StoryboardAgent.analyzeEpisode` 内部重试 3 次后仍然是模型供应商侧的瞬时不可用，不是这边代码的 bug。但顺带发现一个真实的 UI 缺口：`EpisodeListView.vue` 的"开始分析"按钮只在 `status==='uploaded'` 时才显示，一旦状态变成 `failed` 就再也没有入口重试，只能等人工改数据库；后端 `analyzeEpisode.ts` 其实完全支持从 `failed` 状态重新触发分析（只挡 `analyzing` 状态防止并发重复），纯粹是前端漏了这个按钮。
+
+**改了什么**：`EpisodeListView.vue` 加一个 `status==='failed'` 时显示的"重新分析"按钮（`theme="warning"` 区分于"开始分析"的默认样式），复用同一个 `handleAnalyze`，不需要改后端。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 真实点击 episode 55 的"重新分析"，确认状态立刻变成 `analyzing`，轮询正常检测到结束后按钮重新出现；这次真实调用又失败了，`o_tasks` 里新记录的 `reason` 是同样的 `Upstream service temporarily unavailable`（换了个 request id），说明重试机制本身没问题，是模型供应商当下确实还在抖动，等供应商恢复后再点"重新分析"即可。
+
+---
+
 ## 2026-08-05 会话页面调用时间轴改成正序（最早的调用在最上面）
 
 **用户意见 / 触发原因**：“会话页面调用时间轴为什么是倒序的，可以正序么”。原来 `TaskTimelinePanel.vue` 特意 `.reverse()` 成最新调用在最上面（仿照独立监控页面点开详情那种"最近发生的先看到"的习惯），用户希望反过来，最早的调用在最上面、按发生顺序往下读。
