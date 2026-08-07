@@ -12,6 +12,7 @@ import { resolveImageModelKey } from "@/agents/shared/imageModel";
 import { resolveVideoModelKey } from "@/agents/shared/videoModel";
 import { resolveVideoResolution } from "@/agents/shared/videoResolution";
 import { ensurePublicImageUrl } from "@/agents/shared/publicImageUrl";
+import { resolveAdImagePath } from "@/agents/shared/adMedia";
 
 const TEXT_MODEL_KEY = "anthropic:claude-opus-4-8";
 // 老数据（这个字段上线之前生成的 draft）没有 durationS，回退到原来固定用的 6 秒
@@ -59,9 +60,11 @@ function findEpisodeLastFrame(episodeId: number): string | null {
  * 已经用视觉判断挑出的 tileCandidates 里第一张（画面已经确认过清晰、能代表游戏真实界面/玩法），
  * 老数据没有这个字段或候选帧文件缺失才退回"取文件名排序第一张"的机械做法。
  */
-function findAdReferenceFrame(adId: number, sourceType: string | null, sourceFilePath: string | null, tileCandidates: string[] = []): string | null {
-  if (sourceType === "image") return sourceFilePath && fs.existsSync(sourceFilePath) ? sourceFilePath : null;
-  if (sourceType === "video") {
+// 一条素材现在可能同时有图片和视频（sourceTypes 是数组）——图片优先，因为图片就是一张确定的画面，
+// 视频还要靠 tileCandidates/抽帧目录去猜"哪一帧最能代表游戏"，图片更直接可靠
+function findAdReferenceFrame(adId: number, sourceTypes: string[], imagePath: string | null, tileCandidates: string[] = []): string | null {
+  if (sourceTypes.includes("image") && imagePath && fs.existsSync(imagePath)) return imagePath;
+  if (sourceTypes.includes("video")) {
     const framesDir = u.getPath(["ad", String(adId), "frames"]);
     if (!fs.existsSync(framesDir)) return null;
     if (tileCandidates.length > 0) {
@@ -113,7 +116,7 @@ async function buildReferenceList(episodeId: number, adId: number, ad: AdEntry, 
   const refs: { type: "image"; base64: string }[] = [];
   const episodeFrame = findEpisodeLastFrame(episodeId);
   if (episodeFrame) refs.push({ type: "image", base64: fileToBase64(episodeFrame) });
-  const adFrame = findAdReferenceFrame(adId, ad.sourceType, adRow?.sourceFilePath ?? null, ad.tileCandidates);
+  const adFrame = findAdReferenceFrame(adId, ad.sourceType, adRow ? resolveAdImagePath(adRow) : null, ad.tileCandidates);
   if (adFrame) refs.push({ type: "image", base64: fileToBase64(adFrame) });
   const gameAssetRelPath = await findGameAssetReferenceFrame(creativePlanId);
   if (gameAssetRelPath) refs.push({ type: "image", base64: (await u.oss.getFile(gameAssetRelPath)).toString("base64") });

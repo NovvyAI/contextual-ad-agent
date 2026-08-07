@@ -11,25 +11,26 @@ export default router.post(
   "/",
   validateFields({
     name: z.string(),
-    adType: z.enum(["video", "image", "text"]),
-    sourceFilePath: z.string().optional(),
+    imageFilePath: z.string().optional(),
+    videoFilePath: z.string().optional(),
     textContent: z.string().optional(),
     brandName: z.string().optional(),
   }),
   async (req, res) => {
-    const { name, adType, sourceFilePath, textContent, brandName } = req.body;
+    const { name, imageFilePath, videoFilePath, textContent, brandName } = req.body;
 
-    if (adType === "text") {
-      if (!textContent) return res.status(400).send(error("adType=text 需要提供 textContent"));
-    } else {
-      if (!sourceFilePath) return res.status(400).send(error(`adType=${adType} 需要提供 sourceFilePath`));
-      if (!fs.existsSync(sourceFilePath)) return res.status(400).send(error(`文件不存在: ${sourceFilePath}`));
-    }
+    // 图片/视频/文案独立可选，但至少要给一种——一条素材现在可以同时带多种形式，不再互斥
+    if (!imageFilePath && !videoFilePath && !textContent) return res.status(400).send(error("图片/视频/文案至少要提供一种"));
+    if (imageFilePath && !fs.existsSync(imageFilePath)) return res.status(400).send(error(`图片文件不存在: ${imageFilePath}`));
+    if (videoFilePath && !fs.existsSync(videoFilePath)) return res.status(400).send(error(`视频文件不存在: ${videoFilePath}`));
+
+    const adType = [imageFilePath && "image", videoFilePath && "video", textContent && "text"].filter(Boolean).join(",");
 
     const [id] = await u.db("ab_ad").insert({
       name,
       adType,
-      sourceFilePath: sourceFilePath ?? null,
+      imageFilePath: imageFilePath ?? null,
+      videoFilePath: videoFilePath ?? null,
       textContent: textContent ?? null,
       brandName: brandName ?? null,
       status: "uploaded",

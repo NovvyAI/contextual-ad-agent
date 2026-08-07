@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 独立监控页面（data/monitor/index.html）的 SPA 版本——同一份数据源和 socket 协议，搬进主应用当一个
-// 和 Episodes/创意素材平级的 tab，不用再单独开一个 http://localhost:10588/monitor/ 页签、也不用手动
+// 和 Episodes/营销素材平级的 tab，不用再单独开一个 http://localhost:10588/monitor/ 页签、也不用手动
 // 同步 localStorage token（http.ts 的拦截器已经处理了）。data/monitor/index.html 本身保留不删——
 // 它是给不经过 Vite 的部署场景（纯后端跑起来就能看）用的独立入口，两边各自维护，逻辑是同一套后端接口。
 import { ref, computed, onMounted, onUnmounted } from "vue";

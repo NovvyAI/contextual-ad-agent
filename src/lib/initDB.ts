@@ -203,7 +203,10 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.increments("id");
         table.text("name");
         table.text("sourceFilePath");
-        table.text("adType"); // video | image | copy
+        table.text("adType"); // 老单类型字段，新记录改用下面 imageFilePath/videoFilePath/textContent 三个独立字段，
+        // 这一列变成"这条素材包含哪些类型"的 CSV（如 "image,video"），只给列表展示用，不再是校验/分支依据
+        table.text("imageFilePath");
+        table.text("videoFilePath");
         table.text("brandName");
         table.text("status");
         table.integer("createTime");

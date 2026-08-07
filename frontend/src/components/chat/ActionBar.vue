@@ -96,7 +96,7 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
 <template>
   <div style="padding: 12px 16px; border-top: 1px solid var(--td-border-level-2-color, #e7e7e7); display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
     <template v-if="sessionState.episode.workflowStage === 'uploaded'">
-      <t-select v-model="selectedAdIds" multiple placeholder="选择要参与创意方案的创意素材" style="min-width: 260px">
+      <t-select v-model="selectedAdIds" multiple placeholder="选择要参与创意方案的营销素材" style="min-width: 260px">
         <t-option v-for="ad in ads" :key="ad.id" :value="ad.id" :label="ad.name" :title="ad.summary" />
       </t-select>
       <t-button theme="primary" :disabled="!selectedAdIds.length || busy" @click="onGeneratePlan(selectedAdIds)">生成创意方案</t-button>
