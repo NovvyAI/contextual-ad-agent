@@ -12,6 +12,21 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 匹配创作会话接入完整生成流程（创意方案/分镜草案等），工作流改成挂会话级而不是 Episode 级
+
+**用户意见 / 触发原因**：“匹配创作会话里，把episodes会话里面创意生成，分镜草案，等等这些功能也加到匹配创作会话里”——上一版"匹配创作会话"只是并排看分析结果的只读页面，这次要求把 `/episodes/:id` 的完整聊天驱动生成流程也接进来。关键架构分叉：现有工作流状态（`workflowStage`）挂在 `ab_episode` 上，一个 Episode 同一时间只能有一个进行中的工作流；而一个 Episode 完全可能配对多条不同广告、各自独立推进创作。通过 AskUserQuestion 确认选择"改成挂在匹配会话级"（更大改动）而不是"匹配会话只是进入 Episode 唯一工作流的快捷入口"——这样同一个 Episode 可以有多个匹配创作会话并行推进、互不阻塞。详细设计走了完整 plan mode，方案见 `.claude/plans/wiggly-jumping-cosmos.md`。
+
+**改了什么**：
+- **数据模型**：`ab_matchSession` 新增 `workflowStage`（独立于 `ab_episode.workflowStage` 的一份状态，创建时置 `uploaded`）；`ab_creativePlan`/`ab_manifest`/`ab_chatEvent` 各新增可空 `matchSessionId`——legacy 流程生成的行这一列是 null，匹配会话流程生成的行额外打上标签（`episodeId`/`adId` 照常填，下游 Agent 还是靠这两列寻址）。
+- **后端**：探索确认现有生成管线（VideoGenAgent/PlayableAgent/SupervisorAgent/Assembler 的核心函数、以及 `actions.ts` 里 4 个函数中的 3 个）本来就是纯 `creativePlanId`/`bridgeCutId` 寻址，不依赖 episodeId 做隔离，两种模式天然共用、不用改；真正耦合 episodeId 的只有 `state.ts` 的 5 个函数、`actions.ts` 里转手传 episodeId 的 3 个函数、`assembler.assemble` 写 `ab_manifest.episodeId`、`sessionAgent/index.ts` 的 LLM 意图路由里 `buildPlansContext` 和 3 个工具闭包。新增 `matchSessionState.ts`/`matchSessionActions.ts` 镜像这一小部分，读写 `ab_matchSession.workflowStage` 而不是 `ab_episode.workflowStage`；`DirectorAgent.generatePlans` 完全不用改（单元素 `adIds` 本来就是一等公路径，"打标签"这一步在 wrapper 层做）。Socket 连接握手改成二选一：`matchSessionId` 存在时从 `ab_matchSession` 查出真实 episodeId（不信任客户端直传），4 个耦合 episodeId 的事件处理器按模式分流，其余 6 个零改动共用。新增 `getMatchSessionState`/`getMatchSessionProgress`/`getMatchSessionTasks` 三个路由镜像 episode 版对应接口。
+- **前端**：`stores/sessionAgent.ts` 的 store 工厂泛化成 `SessionKey`（`{kind:"episode"}` / `{kind:"matchSession"}`），发现 socket 客户端实际 emit 的事件 payload 里从来不带 episodeId（只在连接握手传一次），所以十几个 emit 动作函数完全不用改，只有连接 auth 字段和 3 个 REST 接口的 URL 按 kind 分流。`ActionBar.vue` 加 `fixedAdId` 可选 prop——匹配会话模式下广告已经配对锁定，隐藏广告多选下拉框。`MatchSessionDetailView.vue` 在原有两栏只读分析面板下方新增完整聊天/生成区，组件接线方式照抄 `SessionView.vue`。
+- **顺带修的一个真实 bug**：`MatchSessionDetailView.vue` 最初漏加了 `SessionView.vue` 里那个"助手消息生成完成后重新拉一次 sessionState"的 watcher，导致确认方案后页面顶部 workflowStage/进度条一直停留在旧值、要手动刷新才更新（DB 其实已经正确推进）——按钮触发的 socket 事件和聊天文字走的是同一套 status 追踪，补上这个 watcher 后修复。
+- **已知限制（记录、不解决）**：任务时间轴和落地终审状态反推不做匹配会话级隔离——`o_tasks.projectId` 全项目统一用 episodeId，同一个 Episode 如果有多个匹配会话同时在跑生成，时间轴会看到彼此的调用记录。要彻底隔离需要把 matchSessionId 铺进 `taskRecord`/`o_tasks` 本身，牵动全项目所有 Agent 调用，这次不做。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean；`sqlite3` 确认 4 张表新列都加上、老数据正确回填/保持 null。Claude in Chrome 全程真实验证：匹配会话 #1（Episode 57 × 广告 23）点"生成创意方案"真实跑通 DirectorAgent，两份方案（`matchSessionId=1`）正确生成；确认方案 111 后 `workflowStage` 推进到 `content_review`、110 自动 rejected；生成分镜草案真实跑通 VideoGenAgent（图片生成 ~52s），`ab_bridgeCut` 正确关联到带 matchSessionId 的方案。**核心验证**：又创建匹配会话 #4（同一个 Episode 57 × 不同广告 22），独立生成了另一批方案（`matchSessionId=4`），`sqlite3` 确认两个匹配会话的 `workflowStage`（`content_review` vs `plan_review`）和各自的 `creativePlans` 完全隔离、互不干扰——证明了这次架构改动真正达成的目标：同一个 Episode 的多个匹配会话可以并行独立推进。最后打开 legacy 的 `/episodes/57` 确认老聊天流程和老数据（`matchSessionId` 为 null 的方案）完全未受影响，正常加载。
+
+---
+
 ## 2026-08-06 新增"匹配创作会话"tab：选 Episode + 营销素材配对，并排看两边分析结果
 
 **用户意见 / 触发原因**：“现在要稍微改一下UI，要新增一个tab，在"营销素材"后面。叫"匹配创作会话"，有创建会话按钮，要选择哪个 Episode，哪个营销创意。创建后，进入会话会有剧情分析的结果，营销素材分析的结果。”——通过 AskUserQuestion 确认这是完全独立于现有 `/episodes/:id` 聊天/生成创意方案流程的新页面，这一步只做"配对 + 并排看两边分析结果"，不涉及聊天或生成方案。详细设计走了完整 plan mode，方案见 `.claude/plans/wiggly-jumping-cosmos.md`。

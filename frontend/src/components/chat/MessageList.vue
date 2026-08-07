@@ -2,7 +2,7 @@
 import type { ChatMessagesData, AIMessage } from "@/types/chatMessagesData";
 import { contentRegistry } from "./registry";
 
-defineProps<{ messages: ChatMessagesData[]; episodeId: number }>();
+defineProps<{ messages: ChatMessagesData[]; episodeId: number; matchSessionId?: number }>();
 </script>
 
 <template>
@@ -22,6 +22,7 @@ defineProps<{ messages: ChatMessagesData[]; episodeId: number }>();
           :key="item.id ?? item.type"
           :content="item"
           :episode-id="episodeId"
+          :match-session-id="matchSessionId"
         />
       </template>
       <div v-if="message.status === 'error'" style="color: var(--td-error-color, #d54941); font-size: 13px">{{ message.ext?.error ?? "出错了" }}</div>

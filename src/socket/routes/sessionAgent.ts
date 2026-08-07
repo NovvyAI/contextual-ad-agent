@@ -3,8 +3,10 @@ import u from "@/utils";
 import { Namespace, Socket } from "socket.io";
 import * as agent from "@/agents/sessionAgent";
 import * as state from "@/agents/sessionAgent/state";
+import * as matchSessionState from "@/agents/sessionAgent/matchSessionState";
 import * as videoGenAgent from "@/agents/videoGenAgent";
 import * as actions from "@/agents/sessionAgent/actions";
+import * as matchSessionActions from "@/agents/sessionAgent/matchSessionActions";
 import ResTool from "@/socket/resTool";
 import { wrapSocketForPersistence } from "@/socket/persistingSocket";
 import taskEvents from "@/utils/taskEvents";
@@ -31,17 +33,33 @@ export default (nsp: Namespace) => {
       socket.disconnect();
       return;
     }
-    // 一个 episode 对应一次会话，episodeId 在这里扮演 Toonflow scriptAgent 里 isolationKey 的角色
-    const episodeId = Number(socket.handshake.auth.episodeId);
-    if (!episodeId) {
-      console.log("[sessionAgent] 连接失败，缺少 episodeId");
-      socket.disconnect();
-      return;
+    // 一个 episode 对应一次 legacy 会话，episodeId 在这里扮演 Toonflow scriptAgent 里 isolationKey 的角色；
+    // 匹配创作会话模式下握手带的是 matchSessionId——真实 episodeId 从 ab_matchSession 这一行查出来，
+    // 不信任客户端直接传的 episodeId（isolation key/所有权判断全靠服务端这里解析出的 episodeId/matchSessionId）
+    const rawMatchSessionId = Number(socket.handshake.auth.matchSessionId);
+    let episodeId: number;
+    let matchSessionId: number | undefined;
+    if (rawMatchSessionId) {
+      const matchSession = await u.db("ab_matchSession").where("id", rawMatchSessionId).first();
+      if (!matchSession) {
+        console.log("[sessionAgent] 连接失败，matchSessionId 无效:", rawMatchSessionId);
+        socket.disconnect();
+        return;
+      }
+      matchSessionId = rawMatchSessionId;
+      episodeId = matchSession.episodeId!;
+    } else {
+      episodeId = Number(socket.handshake.auth.episodeId);
+      if (!episodeId) {
+        console.log("[sessionAgent] 连接失败，缺少 episodeId/matchSessionId");
+        socket.disconnect();
+        return;
+      }
     }
 
-    console.log("[sessionAgent] 已连接:", socket.id, "episodeId:", episodeId);
+    console.log("[sessionAgent] 已连接:", socket.id, "episodeId:", episodeId, "matchSessionId:", matchSessionId ?? "(无)");
 
-    const resTool = new ResTool(wrapSocketForPersistence(socket, episodeId), { episodeId });
+    const resTool = new ResTool(wrapSocketForPersistence(socket, episodeId, matchSessionId), { episodeId });
     let abortController: AbortController | null = null;
 
     // 会话进度面板：taskEvents 是全局事件总线（所有 episode 的调用都会 emit），这里按 episodeId
@@ -69,7 +87,8 @@ export default (nsp: Namespace) => {
       try {
         // DirectorAgent.generatePlans 现在固定产出 2 份方案，一条消息里放两张卡片、并排展示，
         // 方便用户直接比较，不再是一份方案一条独立消息（那样会在聊天里纵向堆叠）
-        const plans = await state.startPlanning(episodeId, data.adIds);
+        // 匹配创作会话模式下广告已经被配对锁定，data.adIds 不使用（matchSessionState.startPlanning 内部直接读 ab_matchSession.adId）
+        const plans = matchSessionId ? await matchSessionState.startPlanning(matchSessionId) : await state.startPlanning(episodeId, data.adIds);
         const msg = resTool.newMessage("assistant", "创意总监");
         msg.planCandidatePair({
           plans: plans.map((plan) => ({
@@ -91,7 +110,8 @@ export default (nsp: Namespace) => {
 
     // plan:approve —— 按钮点击和聊天说"我选方案X"共用 actions.confirmPlanAction
     socket.on("plan:approve", async (data: { planId: number }) => {
-      await actions.confirmPlanAction(resTool, episodeId, data.planId);
+      if (matchSessionId) await matchSessionActions.confirmPlanAction(resTool, matchSessionId, data.planId);
+      else await actions.confirmPlanAction(resTool, episodeId, data.planId);
     });
 
     // plan:feedback —— 喜欢/不喜欢按钮，纯打分反馈不影响流程，不需要聊天触发也不需要回消息，
@@ -114,7 +134,11 @@ export default (nsp: Namespace) => {
     // imageModelKey/videoModelKey/videoResolution：用户在生成前选的图片/视频模型/分辨率（可选），
     // 只有按钮走的这条路会带，聊天触发走系统默认
     socket.on("bridgeCut:generate", async (data: { creativePlanId: number; imageModelKey?: string; videoModelKey?: string; videoResolution?: string }) => {
-      await actions.generateContentAction(resTool, episodeId, data.creativePlanId, data.imageModelKey, data.videoModelKey, data.videoResolution);
+      if (matchSessionId) {
+        await matchSessionActions.generateContentAction(resTool, matchSessionId, data.creativePlanId, data.imageModelKey, data.videoModelKey, data.videoResolution);
+      } else {
+        await actions.generateContentAction(resTool, episodeId, data.creativePlanId, data.imageModelKey, data.videoModelKey, data.videoResolution);
+      }
     });
 
     // bridgeCut:retry —— 只有按钮会触发（对已存在失败 cut 的操作，不在"聊天触发下一步"范围内）
@@ -170,7 +194,8 @@ export default (nsp: Namespace) => {
 
     // content:confirm —— 按钮点击和聊天触发共用 actions.confirmContentAction
     socket.on("content:confirm", async (data: { creativePlanId: number }) => {
-      await actions.confirmContentAction(resTool, episodeId, data.creativePlanId);
+      if (matchSessionId) await matchSessionActions.confirmContentAction(resTool, matchSessionId, data.creativePlanId);
+      else await actions.confirmContentAction(resTool, episodeId, data.creativePlanId);
     });
 
     // chat —— 自由文字，交给 LLM 做意图路由（识别"确认/下一步"类意图 + 方案/内容 revise）
@@ -180,6 +205,7 @@ export default (nsp: Namespace) => {
       // 用户说过什么，不实时 emit（emit 了会在当前这次会话里造成重复气泡，前端已经本地显示过一次了）
       await u.db("ab_chatEvent").insert({
         episodeId,
+        matchSessionId: matchSessionId ?? null,
         eventType: "message",
         payload: JSON.stringify({
           id: u.uuid(),
@@ -199,6 +225,7 @@ export default (nsp: Namespace) => {
       const ctx: agent.AgentContext = {
         socket,
         episodeId,
+        matchSessionId,
         text: data.content,
         abortSignal: currentController.signal,
         resTool,

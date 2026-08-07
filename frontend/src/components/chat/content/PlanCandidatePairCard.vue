@@ -5,7 +5,7 @@
 import type { PlanCandidatePairContent, PlanCandidateContent } from "@/types/chatMessagesData";
 import PlanCandidateCard from "./PlanCandidateCard.vue";
 
-const props = defineProps<{ content: PlanCandidatePairContent; episodeId: number }>();
+const props = defineProps<{ content: PlanCandidatePairContent; episodeId: number; matchSessionId?: number }>();
 
 function wrap(plan: PlanCandidateContent["data"]): PlanCandidateContent {
   return { type: "planCandidate", id: `${props.content.id}-${plan.id}`, data: plan, status: "complete" };
@@ -19,6 +19,7 @@ function wrap(plan: PlanCandidateContent["data"]): PlanCandidateContent {
       :key="plan.id"
       :content="wrap(plan)"
       :episode-id="episodeId"
+      :match-session-id="matchSessionId"
       style="flex: 1; min-width: 280px"
     />
   </div>
