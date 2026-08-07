@@ -163,6 +163,19 @@ export default async (knex: Knex): Promise<void> => {
   // 创意方案加喜欢/不喜欢反馈按钮，纯打分信号不影响流程，落库留作后续训练数据用
   await addColumn("ab_creativePlan", "feedback", "text");
   await addColumn("ab_creativePlan", "feedbackAt", "integer");
+  // 匹配创作会话接入完整生成流程：工作流状态从"挂在 Episode 上"改成"挂在匹配会话上"，
+  // 这样同一个 Episode 可以有多个匹配会话（配不同广告）各自独立并行推进，互不阻塞。
+  // ab_episode.workflowStage 保留不动，legacy 的 /episodes/:id 聊天流程完全不受影响。
+  await addColumn("ab_matchSession", "workflowStage", "text");
+  if (await knex.schema.hasTable("ab_matchSession")) {
+    await knex("ab_matchSession").whereNull("workflowStage").update({ workflowStage: "uploaded" });
+  }
+  // legacy 流程生成的方案这一列是 null；匹配会话流程生成的方案额外打上这个标签，
+  // episodeId/adId 两列照常填不变（下游 VideoGenAgent 等还是靠这两列寻址）
+  await addColumn("ab_creativePlan", "matchSessionId", "integer");
+  await addColumn("ab_manifest", "matchSessionId", "integer");
+  // 否则同一个 Episode 的多个匹配会话聊天记录会在 where episodeId 查询下混在一起
+  await addColumn("ab_chatEvent", "matchSessionId", "integer");
   void alterColumnType;
   // 供应商自动注册：data/vendor/*.ts 里存在、但 o_vendorConfig 里还没有对应行的供应商，
   // 读取源码跑一遍沙箱拿到 vendor.id/inputValues，写入一行禁用状态的配置。

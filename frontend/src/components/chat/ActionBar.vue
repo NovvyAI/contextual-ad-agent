@@ -5,6 +5,8 @@ import type { SessionState } from "@/stores/sessionAgent";
 const props = defineProps<{
   sessionState: SessionState;
   ads: { id: number; name: string; summary: string }[];
+  // 匹配创作会话模式下传入——广告已经在配对时锁定，"生成创意方案"不再需要选广告，直接隐藏下拉框
+  fixedAdId?: number;
   busy: boolean;
   onGeneratePlan: (adIds: number[]) => void;
   onGenerateContent: (creativePlanId: number, imageModelKey: string, videoModelKey: string, videoResolution: string) => void;
@@ -96,10 +98,15 @@ const failedCuts = computed(() => currentPlanCuts.value.filter((c) => c.status =
 <template>
   <div style="padding: 12px 16px; border-top: 1px solid var(--td-border-level-2-color, #e7e7e7); display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
     <template v-if="sessionState.episode.workflowStage === 'uploaded'">
-      <t-select v-model="selectedAdIds" multiple placeholder="选择要参与创意方案的营销素材" style="min-width: 260px">
-        <t-option v-for="ad in ads" :key="ad.id" :value="ad.id" :label="ad.name" :title="ad.summary" />
-      </t-select>
-      <t-button theme="primary" :disabled="!selectedAdIds.length || busy" @click="onGeneratePlan(selectedAdIds)">生成创意方案</t-button>
+      <template v-if="fixedAdId">
+        <t-button theme="primary" :disabled="busy" @click="onGeneratePlan([fixedAdId])">生成创意方案</t-button>
+      </template>
+      <template v-else>
+        <t-select v-model="selectedAdIds" multiple placeholder="选择要参与创意方案的营销素材" style="min-width: 260px">
+          <t-option v-for="ad in ads" :key="ad.id" :value="ad.id" :label="ad.name" :title="ad.summary" />
+        </t-select>
+        <t-button theme="primary" :disabled="!selectedAdIds.length || busy" @click="onGeneratePlan(selectedAdIds)">生成创意方案</t-button>
+      </template>
     </template>
 
     <template v-else-if="sessionState.episode.workflowStage === 'plan_review'">

@@ -2,9 +2,9 @@
 import { ref } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import type { PlanCandidateContent } from "@/types/chatMessagesData";
-import useSessionAgentStore from "@/stores/sessionAgent";
+import useSessionAgentStore, { type SessionKey } from "@/stores/sessionAgent";
 
-const props = defineProps<{ content: PlanCandidateContent; episodeId: number }>();
+const props = defineProps<{ content: PlanCandidateContent; episodeId: number; matchSessionId?: number }>();
 
 const statusLabel: Record<string, string> = { draft: "待确认", approved: "已确认", rejected: "已否决" };
 const statusTheme: Record<string, "default" | "success" | "danger"> = { draft: "default", approved: "success", rejected: "danger" };
@@ -12,8 +12,12 @@ const statusTheme: Record<string, "default" | "success" | "danger"> = { draft: "
 // 喜欢/不喜欢只是打分反馈，不影响审批流程；本地维护一份状态做即时视觉反馈，点击后落库供以后训练用
 const localFeedback = ref<"like" | "dislike" | null>(props.content.data.feedback ?? null);
 
+function sessionKey(): SessionKey {
+  return props.matchSessionId ? { kind: "matchSession", matchSessionId: props.matchSessionId } : { kind: "episode", episodeId: props.episodeId };
+}
+
 function handleApprove() {
-  const store = useSessionAgentStore(props.episodeId);
+  const store = useSessionAgentStore(sessionKey());
   store.approvePlan(props.content.data.id);
   MessagePlugin.info("已发送确认请求");
 }
@@ -21,7 +25,7 @@ function handleApprove() {
 function handleFeedback(value: "like" | "dislike") {
   const next = localFeedback.value === value ? null : value; // 再点一次同一个按钮取消选择
   localFeedback.value = next;
-  const store = useSessionAgentStore(props.episodeId);
+  const store = useSessionAgentStore(sessionKey());
   store.setPlanFeedback(props.content.data.id, next);
 }
 </script>

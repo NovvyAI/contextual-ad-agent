@@ -11,12 +11,12 @@ const PERSISTABLE_EVENTS = new Set(["message", "message:update", "content:add", 
  * 落库到 `ab_chatEvent`，再转发给真实 socket 触发实时推送。落库是 fire-and-forget（不 await），
  * 失败只打日志——不能因为这个影响实时消息投递。
  */
-export function wrapSocketForPersistence(socket: Socket, episodeId: number): Socket {
+export function wrapSocketForPersistence(socket: Socket, episodeId: number, matchSessionId?: number): Socket {
   return {
     emit: (event: string, payload?: any) => {
       if (PERSISTABLE_EVENTS.has(event)) {
         u.db("ab_chatEvent")
-          .insert({ episodeId, eventType: event, payload: JSON.stringify(payload), createTime: Date.now() })
+          .insert({ episodeId, matchSessionId: matchSessionId ?? null, eventType: event, payload: JSON.stringify(payload), createTime: Date.now() })
           .catch((e) => console.error("[chatEvent persist] 写入失败:", u.error(e).message));
       }
       return socket.emit(event as any, payload);

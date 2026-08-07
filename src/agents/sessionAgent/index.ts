@@ -9,12 +9,16 @@ import { revisePlan } from "@/agents/directorAgent";
 import { reviseDraftCut, reviseStageBMotion } from "@/agents/videoGenAgent";
 import { revisePlayable, reviseCustomGame } from "@/agents/playableAgent";
 import * as actions from "@/agents/sessionAgent/actions";
+import * as matchSessionActions from "@/agents/sessionAgent/matchSessionActions";
 
 const MODEL_KEY = "anthropic:claude-opus-4-8";
 
 export interface AgentContext {
   socket: Socket;
   episodeId: number;
+  // 匹配创作会话模式下有值——3 个真正耦合 episodeId 的工具（确认方案/生成内容/确认内容）据此
+  // 分流到 matchSessionActions.*（挂 ab_matchSession.workflowStage）而不是 actions.*（挂 ab_episode.workflowStage）
+  matchSessionId?: number;
   text: string;
   abortSignal?: AbortSignal;
   resTool: ResTool;
@@ -196,7 +200,8 @@ function createTools(ctx: AgentContext) {
       "背后是和按钮点击完全一样的确定性逻辑，会自动校验当前阶段是否允许。",
     inputSchema: jsonSchema<{ planId: number }>(planIdInputSchema.toJSONSchema()),
     execute: async ({ planId }) => {
-      await actions.confirmPlanAction(ctx.resTool, ctx.episodeId, planId);
+      if (ctx.matchSessionId) await matchSessionActions.confirmPlanAction(ctx.resTool, ctx.matchSessionId, planId);
+      else await actions.confirmPlanAction(ctx.resTool, ctx.episodeId, planId);
       return `已提交对方案 ${planId} 的确认请求，处理结果请看下方消息。`;
     },
   });
@@ -205,7 +210,8 @@ function createTools(ctx: AgentContext) {
     description: "为已确认（approved）的方案生成桥接内容，仅在用户明确要求开始生成内容/分镜草案时调用（比如「开始生成内容」「生成吧」）",
     inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
     execute: async ({ creativePlanId }) => {
-      await actions.generateContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
+      if (ctx.matchSessionId) await matchSessionActions.generateContentAction(ctx.resTool, ctx.matchSessionId, creativePlanId);
+      else await actions.generateContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
       return `已为方案 ${creativePlanId} 提交生成内容的请求，处理结果请看下方消息。`;
     },
   });
@@ -233,7 +239,8 @@ function createTools(ctx: AgentContext) {
     description: "确认内容完成、进入终审与落地，仅在用户明确表示内容没问题可以进入终审时调用（比如「可以了，提交终审」「确认内容」）",
     inputSchema: jsonSchema<{ creativePlanId: number }>(creativePlanIdInputSchema.toJSONSchema()),
     execute: async ({ creativePlanId }) => {
-      await actions.confirmContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
+      if (ctx.matchSessionId) await matchSessionActions.confirmContentAction(ctx.resTool, ctx.matchSessionId, creativePlanId);
+      else await actions.confirmContentAction(ctx.resTool, ctx.episodeId, creativePlanId);
       return `已为方案 ${creativePlanId} 提交进入终审与落地的请求，处理结果请看下方消息。`;
     },
   });
@@ -252,9 +259,15 @@ function createTools(ctx: AgentContext) {
   };
 }
 
-async function buildPlansContext(episodeId: number): Promise<string> {
-  const episode = await u.db("ab_episode").where("id", episodeId).first();
-  const plans = await u.db("ab_creativePlan").where("episodeId", episodeId).orderBy("id");
+async function buildPlansContext(episodeId: number, matchSessionId?: number): Promise<string> {
+  // matchSessionId 存在时按它过滤方案——否则同一个 Episode 名下别的匹配会话/legacy 流程生成的方案
+  // 会一起被塞进上下文，模型会看错"当前方案"是哪一份
+  const workflowStage = matchSessionId
+    ? (await u.db("ab_matchSession").where("id", matchSessionId).first())?.workflowStage
+    : (await u.db("ab_episode").where("id", episodeId).first())?.workflowStage;
+  const plans = matchSessionId
+    ? await u.db("ab_creativePlan").where("matchSessionId", matchSessionId).orderBy("id")
+    : await u.db("ab_creativePlan").where("episodeId", episodeId).orderBy("id");
   const planLines = plans.length
     ? plans.map((p: any) => `- 方案 id=${p.id} adId=${p.adId} status=${p.status} 基调=${p.tone}`)
     : ["（暂无）"];
@@ -275,13 +288,13 @@ async function buildPlansContext(episodeId: number): Promise<string> {
       })
     : ["（暂无）"];
 
-  return `## 当前阶段\nworkflowStage=${episode?.workflowStage ?? "未知"}\n\n## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;
+  return `## 当前阶段\nworkflowStage=${workflowStage ?? "未知"}\n\n## 当前创意方案\n${planLines.join("\n")}\n\n## 当前内容 cut\n${cutLines.join("\n")}`;
 }
 
 export async function runDecisionAI(ctx: AgentContext): Promise<void> {
   const skillPath = path.join(u.getPath("skills"), "session_agent_decision.md");
   const skillPrompt = await fs.promises.readFile(skillPath, "utf-8");
-  const plansContext = await buildPlansContext(ctx.episodeId);
+  const plansContext = await buildPlansContext(ctx.episodeId, ctx.matchSessionId);
   // 当前运行时状态不伪装成 assistant 说过的话——那个角色语义上代表"模型之前的输出"，
   // 硬塞运行时状态进去容易让模型把它当成自己的既有结论，调试时也分不清是真实对话还是系统注入。
   // 挪进 system 里，和用户消息严格分开，语义清楚：这是框架每次现查现拼给模型看的当前状态，不是对话历史。

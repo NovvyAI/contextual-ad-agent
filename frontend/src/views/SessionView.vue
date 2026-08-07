@@ -12,7 +12,7 @@ import TaskTimelinePanel from "@/components/session/TaskTimelinePanel.vue";
 
 const route = useRoute();
 const episodeId = computed(() => Number(route.params.id));
-const store = computed(() => useSessionAgentStore(episodeId.value));
+const store = computed(() => useSessionAgentStore({ kind: "episode", episodeId: episodeId.value }));
 
 const ads = ref<{ id: number; name: string; summary: string }[]>([]);
 

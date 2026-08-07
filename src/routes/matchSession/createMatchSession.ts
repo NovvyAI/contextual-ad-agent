@@ -20,7 +20,7 @@ export default router.post(
     if (!ad) return res.status(400).send(error(`营销素材 ${adId} 不存在`));
     if (ad.status !== "analyzed") return res.status(400).send(error(`营销素材 ${adId} 还没有完成分析`));
 
-    const [id] = await u.db("ab_matchSession").insert({ episodeId, adId, createTime: Date.now() });
+    const [id] = await u.db("ab_matchSession").insert({ episodeId, adId, workflowStage: "uploaded", createTime: Date.now() });
     return res.status(200).send(success({ id }));
   },
 );

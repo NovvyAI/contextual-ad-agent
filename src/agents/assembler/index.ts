@@ -62,7 +62,7 @@ export async function assembleCut(bridgeCutId: number): Promise<AssembledDeliver
 }
 
 /** 正式路径：M7 起固定两段式管线，最终交付物永远是 playableGame 段——video 段的产物已经被嵌进它里面，不再单独落地 */
-export async function assemble(episodeId: number, creativePlanId: number, supervision?: SupervisionOutcome): Promise<number> {
+export async function assemble(episodeId: number, creativePlanId: number, supervision?: SupervisionOutcome, matchSessionId?: number): Promise<number> {
   const cuts = await u.db("ab_bridgeCut").where("creativePlanId", creativePlanId);
   const cut = cuts.find((c: any) => c.type === "playableGame");
   if (!cut?.id) throw new Error(`创意方案 ${creativePlanId} 缺少 playableGame cut`);
@@ -84,6 +84,7 @@ export async function assemble(episodeId: number, creativePlanId: number, superv
   const [id] = await u.db("ab_manifest").insert({
     episodeId,
     creativePlanId,
+    matchSessionId: matchSessionId ?? null,
     finalFilePath: deliverable.finalFilePath,
     manifestJson: JSON.stringify(manifestJson),
     status: "done",

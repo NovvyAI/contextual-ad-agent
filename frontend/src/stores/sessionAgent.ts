@@ -1,9 +1,20 @@
-// Session（=Episode）维度的 store 工厂，每个 episodeId 一个独立 store 实例（Map 缓存），
+// Session 维度的 store 工厂，每个 session 一个独立 store 实例（Map 缓存），
 // 照抄 Toonflow-web 的 store-per-session 模式（src/stores/scriptAgent.ts）。
+// 两种 session：legacy 的 Episode 会话（/episodes/:id，工作流挂在 ab_episode 上）和匹配创作会话
+// （/match-sessions/:id，工作流挂在 ab_matchSession 上，同一个 Episode 可以有多个并行）。
+// socket 客户端实际 emit 的事件 payload 里从来不带 episodeId（episodeId 只在连接握手时传一次），
+// 所以两种模式的差异只在：连接 auth 字段、和读状态/进度/任务日志这 3 个 REST 接口的 URL+body——
+// 十几个 emit 动作本身完全共用，不用按 kind 分叉实现。
 import { ref, watch } from "vue";
 import { defineStore } from "pinia";
 import http from "@/utils/http";
 import { useChat } from "@/composables/useChat";
+
+export type SessionKey = { kind: "episode"; episodeId: number } | { kind: "matchSession"; matchSessionId: number };
+
+function sessionKeyToken(key: SessionKey): string {
+  return key.kind === "episode" ? `episode:${key.episodeId}` : `matchSession:${key.matchSessionId}`;
+}
 
 export type StageStatus = "pending" | "in_progress" | "done" | "failed";
 export interface StageProgress {
@@ -79,15 +90,15 @@ export interface SessionState {
   progress: SessionProgress;
 }
 
-function makeSessionAgentStore(episodeId: number) {
-  return defineStore(`sessionAgent-${episodeId}`, () => {
+function makeSessionAgentStore(key: SessionKey) {
+  return defineStore(`sessionAgent-${sessionKeyToken(key)}`, () => {
     const sessionState = ref<SessionState | null>(null);
     const loadingSessionState = ref(false);
     const taskLog = ref<TaskLogEntry[]>([]);
 
     const chat = useChat({
       url: "/api/socket/sessionAgent",
-      auth: () => ({ episodeId }),
+      auth: () => (key.kind === "episode" ? { episodeId: key.episodeId } : { matchSessionId: key.matchSessionId }),
       manageLifecycle: false,
       autoConnect: false,
     });
@@ -130,7 +141,11 @@ function makeSessionAgentStore(episodeId: number) {
 
     async function refreshProgress() {
       try {
-        const res = (await http.post("/api/episode/getSessionProgress", { episodeId })) as any;
+        const res = (
+          key.kind === "episode"
+            ? await http.post("/api/episode/getSessionProgress", { episodeId: key.episodeId })
+            : await http.post("/api/matchSession/getMatchSessionProgress", { matchSessionId: key.matchSessionId })
+        ) as any;
         if (sessionState.value) sessionState.value.progress = res.data;
       } catch {
         // 进度刷新失败不影响主流程，静默跳过，下次事件来了会再试
@@ -143,7 +158,11 @@ function makeSessionAgentStore(episodeId: number) {
     // 就已经跑完的调用（比如在 Episode 列表页点"开始分析"触发的），不补这一步就永远不会出现在时间轴里。
     async function loadTaskLog() {
       try {
-        const res = (await http.post("/api/monitor/getSessionTasks", { episodeId })) as any;
+        const res = (
+          key.kind === "episode"
+            ? await http.post("/api/monitor/getSessionTasks", { episodeId: key.episodeId })
+            : await http.post("/api/matchSession/getMatchSessionTasks", { matchSessionId: key.matchSessionId })
+        ) as any;
         taskLog.value = (res.data ?? []).map((r: any) => ({
           id: r.id,
           taskClass: r.taskClass,
@@ -164,13 +183,30 @@ function makeSessionAgentStore(episodeId: number) {
     async function loadSessionState() {
       loadingSessionState.value = true;
       try {
-        const res = (await http.post("/api/episode/getSessionState", { episodeId })) as any;
-        sessionState.value = res.data;
-        // 只在聊天面板还是空的时候回放历史——loadSessionState 之后还会在别的时机被重新调用
-        // （比如每次助手消息生成完），那些时候 messages 已经有实时消息了，不能再回放一遍历史，
-        // 否则会把已经在看的实时消息前面重复插入一遍
-        if (chat.messages.value.length === 0 && res.data.chatEvents?.length) {
-          chat.hydrateHistory(res.data.chatEvents);
+        if (key.kind === "episode") {
+          const res = (await http.post("/api/episode/getSessionState", { episodeId: key.episodeId })) as any;
+          sessionState.value = res.data;
+          // 只在聊天面板还是空的时候回放历史——loadSessionState 之后还会在别的时机被重新调用
+          // （比如每次助手消息生成完），那些时候 messages 已经有实时消息了，不能再回放一遍历史，
+          // 否则会把已经在看的实时消息前面重复插入一遍
+          if (chat.messages.value.length === 0 && res.data.chatEvents?.length) {
+            chat.hydrateHistory(res.data.chatEvents);
+          }
+        } else {
+          const res = (await http.post("/api/matchSession/getMatchSessionState", { matchSessionId: key.matchSessionId })) as any;
+          const ms = res.data.matchSession;
+          // 归一化成和 episode 模式一样的 SessionState 形状——ActionBar/MessageList 等共用组件只读
+          // workflowStage/episodeAnalysis，title/status/durationMs/createTime 这几个匹配会话模式下用不到，填占位值
+          sessionState.value = {
+            episode: { id: ms.episodeId, title: "", status: "", workflowStage: ms.workflowStage, durationMs: null, createTime: null, episodeAnalysis: ms.episodeAnalysis },
+            creativePlans: res.data.creativePlans,
+            bridgeCuts: res.data.bridgeCuts,
+            manifest: res.data.manifest,
+            progress: res.data.progress,
+          };
+          if (chat.messages.value.length === 0 && res.data.chatEvents?.length) {
+            chat.hydrateHistory(res.data.chatEvents);
+          }
         }
       } finally {
         loadingSessionState.value = false;
@@ -225,9 +261,10 @@ function makeSessionAgentStore(episodeId: number) {
   });
 }
 
-const storeMap = new Map<number, ReturnType<typeof makeSessionAgentStore>>();
+const storeMap = new Map<string, ReturnType<typeof makeSessionAgentStore>>();
 
-export default function useSessionAgentStore(episodeId: number) {
-  if (!storeMap.has(episodeId)) storeMap.set(episodeId, makeSessionAgentStore(episodeId));
-  return storeMap.get(episodeId)!();
+export default function useSessionAgentStore(key: SessionKey) {
+  const token = sessionKeyToken(key);
+  if (!storeMap.has(token)) storeMap.set(token, makeSessionAgentStore(key));
+  return storeMap.get(token)!();
 }
