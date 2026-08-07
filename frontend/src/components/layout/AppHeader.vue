@@ -15,6 +15,7 @@ function logout() {
       <b>contextual-ad-agent</b>
       <router-link to="/episodes">Episodes</router-link>
       <router-link to="/ads">营销素材</router-link>
+      <router-link to="/match-sessions">匹配创作会话</router-link>
       <router-link to="/monitor">会话监控</router-link>
     </div>
     <t-button variant="text" @click="logout">退出登录</t-button>

@@ -8,6 +8,8 @@ const router = createRouter({
     { path: "/episodes", name: "episodes", component: () => import("@/views/EpisodeListView.vue") },
     { path: "/ads", name: "ads", component: () => import("@/views/AdListView.vue") },
     { path: "/ads/:id", name: "adDetail", component: () => import("@/views/AdDetailView.vue"), props: true },
+    { path: "/match-sessions", name: "matchSessions", component: () => import("@/views/MatchSessionListView.vue") },
+    { path: "/match-sessions/:id", name: "matchSessionDetail", component: () => import("@/views/MatchSessionDetailView.vue"), props: true },
     { path: "/monitor", name: "monitor", component: () => import("@/views/MonitorView.vue") },
     { path: "/episodes/:id", name: "session", component: () => import("@/views/SessionView.vue"), props: true },
   ],
