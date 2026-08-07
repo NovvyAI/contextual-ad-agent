@@ -12,6 +12,42 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 "查看分析结果"从悬浮弹窗改成独立详情页，排版结构化
+
+**用户意见 / 触发原因**：“查看分析结果 不要是悬浮的，是需要点击进去看的，点击进去后里面的格式最好也要排版整齐”——上一版是 `t-dialog` 弹窗 + 纯 JSON pretty-print，用户希望是真正跳转的页面，且按字段结构化展示而不是一堆 JSON。
+
+**改了什么**：
+- 新增路由 `/ads/:id` → `AdDetailView.vue`，`AdListView.vue`"查看分析结果"从打开弹窗改成 `router.push`；删掉原来 `resultDialogVisible`/`openResultDialog` 那套弹窗逻辑。
+- `AdDetailView.vue` 按 13 个字段分栏结构化展示（不是纯 JSON）：基础分析、视觉定调（色号做成真实色块+十六进制值、定调手册单独引用块）、情绪基调、视听风格、物料规划（渠道规格用表格）、物料目标（细分目标带测试/商业标签）、衍生裂变、区域裂化（每个地区一张卡片）、用户调研维度（吸引力维度按序号列出）、复盘数据维度。每个字段/分区都有 `v-if` 兜底，老数据/字段缺失只是少展示一块，不报错（复用现有的 `product` 兼容处理）。
+- **顺带修了一个真实 bug**：`AdDetailView.vue` 最初用 `onMounted` 拉数据，从一条素材的详情页直接跳到另一条时（`/ads/23` → `/ads/6`），vue-router 对同一个路由记录只是 `:id` 参数变化会复用组件实例、不会重新 `onMounted`，导致页面 URL 变了但内容还是上一条素材的——这和这个会话里之前在 `SessionView.vue` 发现过的是同一类问题。改成 `watch(adId, ..., {immediate:true})` 后正确了。
+
+**验证**：`npx vue-tsc -b --force` clean。Claude in Chrome 真实点开 #23（新 schema，13 个字段全展示，色号色块、渠道表格、5 个地区卡片都正确渲染）和 #6（老 schema，只有基础分析一块、`product` 字段正确兜底），确认 URL 真的变成 `/ads/:id`（不是弹窗）；用 `location.hash` 在两条素材之间来回切换，确认内容跟着正确刷新（验证了上面提到的那个 bug 修复）。
+
+---
+
+## 2026-08-06 AdLibraryAgent 重新设计：单条素材支持多类型 + 新增 9 个营销策略维度 + 查看分析结果 UI
+
+**用户意见 / 触发原因**：用户发现新建营销素材同时勾图片+视频+纯文字会拆成 3 条独立记录，希望改成"一次提交、一条记录、一个 ID"；同时要求给分析输出新增 9 个营销策略维度（视觉定调、情绪基调、视听风格、物料规划、物料目标、衍生裂变、区域裂化、用户调研维度、复盘数据维度——"创意方案"这个维度用户主动要求删除）；另外提出独立小需求：分析完成后要能点进去看 agent 到底输出了什么。三块一起做（详细设计过程走了完整 plan mode，方案见 `.claude/plans/wiggly-jumping-cosmos.md`）。
+
+**改了什么**：
+- **单条记录多类型**：`ab_ad` 新增 `imageFilePath`/`videoFilePath` 两个独立可空列（`textContent` 复用已有列），三者互不冲突，可以同时非空；老列 `sourceFilePath`/`adType` 保留不动，`adType` 语义从"唯一类型"变成"这条素材包含哪些类型的 CSV"（如 `"image,video"`），只给列表展示用。新增 `src/agents/shared/adMedia.ts` 的 `resolveAdImagePath`/`resolveAdVideoPath`，统一处理"新记录读新列、老记录回退读 sourceFilePath+adType"这套兼容逻辑——`AdLibraryAgent.analyzeAd()` 和 `VideoGenAgent` 挑参考图这两处都要用同一套判断标准，不然会不一致；`VideoGenAgent` 的 `findAdReferenceFrame` 顺带改成吃 `sourceType` 数组（原来是单值）。`createAd.ts`/`updateAd.ts` 从"精确一种类型"改成"三个字段独立可选，至少一种"。前端 `AdListView.vue` 去掉"勾选 N 种形式循环建 N 条"的逻辑，改成一次性提交单条记录。
+- **9 个新维度**：`adLibraryAgent/schema.ts` 新增 `adStrategySchema`（视觉定调含可直接喂给 AI 生成用的"定调手册"全文、情绪基调、视听风格、物料规划、物料目标、衍生裂变、区域裂化、用户调研维度、复盘数据维度）。拆成第二轮独立的 `invokeObject` 调用（不是塞进一次结构化输出）——原因和这个项目其他"多维度评估"agent（DirectorAgent 生成+评估、VideoGenAgent 草案+评估）保持一致的两次调用模式，同时避免单次调用字段过多拖累质量。新增 `adLibraryAgent/prompt.ts`（这个 agent 之前是唯一没有独立 prompt.ts 的）+ 新 skill 文件 `ad_library_agent_strategy.md`。关键约束：物料规划的排期、物料目标的 KPI 只给"应该关注的维度/阶段性框架"，不编造具体数字/日期——agent 除了素材本身什么都不知道。**这次只产出+存储，不接入 DirectorAgent/VideoGenAgent/PlayableAgent/SupervisorAgent 的生成流程**（用户已确认，见 AskUserQuestion 记录）。
+- **查看分析结果**：`getAdListAll.ts` 补上 `analysisResult`/`imageFilePath`/`videoFilePath` 到 select 列表；`AdListView.vue` 加"查看分析结果"按钮，弹窗里 `JSON.parse` 之后 pretty-print 展示——复用 `TaskTimelinePanel.vue` 已经验证过的 `prettyJson` + `.io-content` 样式，不用为每个字段单独设计展示区块，字段以后再变也不用跟着改 UI。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean；`sqlite3` 确认新列迁移成功。Claude in Chrome 全程真实验证：新建一条同时带图片+文案的素材（#23），确认只产生 1 条记录、类型显示"图片+纯文字"（不是拆分成 2 条）；点"开始分析"，`o_tasks` 确认真实跑了两次调用（`ad-analysis` 10.6s + `ad-strategy-analysis` 61s，都成功），产出的定调手册带真实十六进制色号、KPI 是维度名不是编造数字、区域裂化真实覆盖日本/韩国/美国/德国/巴西 5 个地区且话术风格明显不同；点"查看分析结果"确认弹窗完整展示全部 13 个字段；编辑一条老式单类型素材（#6 Lumira Radiance Serum）确认图片路径正确通过兼容逻辑回填；点开一条老数据（`analysisResult` 是 `product` 而不是 `game` 的旧 schema 形状）确认不报错、按已有字段正常展示。
+
+---
+
+## 2026-08-06 UI 文案"创意素材"改成"营销素材"
+
+**用户意见 / 触发原因**：“你把创意素材改成营销素材吧”。
+
+**改了什么**：全局替换 UI 上所有"创意素材"字样为"营销素材"——导航栏链接、`AdListView.vue`（新建/编辑弹窗标题、创建成功提示、批量创建说明、删除确认文案）、`ActionBar.vue` 的素材选择下拉框占位符、后端 `updateAd.ts` 的报错文案。特意保留"创意方案"不变——这是完全不同的概念（DirectorAgent 产出的桥接创意方案），不在这次改名范围内，替换时逐处确认过没有误伤。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean；全仓库重新 grep 确认 `frontend/src`/`src` 下已经没有残留的"创意素材"。Claude in Chrome 真实打开营销素材列表页，确认导航栏、页面标题、编辑弹窗标题、删除确认弹窗文案都已经是"营销素材"，且删除确认文案里的"创意方案"没有被误改。
+
+---
+
 ## 2026-08-06 创意方案生成后加"重新生成方案"按钮
 
 **用户意见 / 触发原因**：“生成方案后，需要添加一个按钮，重新生成方案，就可以再重新生成两个方案了”。上一条改动把生成固定成一次出 2 份，但用户如果两份都不满意，之前完全没有重来一次的入口——`ActionBar.vue` 在 `plan_review` 阶段只有一行提示文字，没有任何按钮；后端 `state.startPlanning` 也硬性只允许 `workflowStage==='uploaded'` 时调用，重复调用会直接报错。

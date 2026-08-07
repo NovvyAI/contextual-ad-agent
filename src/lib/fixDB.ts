@@ -64,6 +64,10 @@ export default async (knex: Knex): Promise<void> => {
   await addColumn("ab_ad", "analysisResult", "text");
   // ab_episode 建表时就有 errorReason，ab_ad 当时漏加了，这里补上，保持两张表状态字段对称
   await addColumn("ab_ad", "errorReason", "text");
+  // 支持"一条素材同时带图片+视频+纯文字"：老的 sourceFilePath+adType 单值组合保留不动（老数据兼容读取用），
+  // 新记录改用这两个独立字段，和已有的 textContent 一起三者互不冲突、可以同时非空
+  await addColumn("ab_ad", "imageFilePath", "text");
+  await addColumn("ab_ad", "videoFilePath", "text");
   // M2: SessionAgent 驱动的会话工作流阶段，和 ab_episode.status（StoryboardAgent 的分析流水线状态）是两个不同的轴
   await addColumn("ab_episode", "workflowStage", "text");
   if (await knex.schema.hasTable("ab_episode")) {

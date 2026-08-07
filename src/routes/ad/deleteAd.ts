@@ -12,7 +12,7 @@ export default router.post(
   async (req, res) => {
     const { adId } = req.body;
     const ad = await u.db("ab_ad").where("id", adId).first();
-    if (!ad) return res.status(400).send(error("广告素材不存在"));
+    if (!ad) return res.status(400).send(error("营销素材不存在"));
 
     // 只删数据库记录，不动 sourceFilePath 指向的原始文件——那是用户机器上的文件，不归这个 App 管
     const planRows = await u.db("ab_creativePlan").where("adId", adId).select("id");
