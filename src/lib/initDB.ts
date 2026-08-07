@@ -302,6 +302,18 @@ export default async (knex: Knex, forceInit: boolean = false): Promise<void> => 
         table.integer("createTime");
       },
     },
+    // "匹配创作会话"——纯粹把一个 Episode 和一条营销素材配对，供并排查看两边的分析结果，
+    // 不涉及聊天/生成创意方案（那套完整流程走的是 ab_creativePlan，是两个独立入口），
+    // 所以没有 status 状态机，展示用的名字现查关联的 episode.title/ad.name，不冗余存一份
+    {
+      name: "ab_matchSession",
+      builder: (table) => {
+        table.increments("id");
+        table.integer("episodeId").unsigned().references("id").inTable("ab_episode");
+        table.integer("adId").unsigned().references("id").inTable("ab_ad");
+        table.integer("createTime");
+      },
+    },
   ];
 
   for (const t of tables) {

@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ActionBar: typeof import('./components/chat/ActionBar.vue')['default']
+    AdAnalysisPanel: typeof import('./components/ad/AdAnalysisPanel.vue')['default']
     AppHeader: typeof import('./components/layout/AppHeader.vue')['default']
     ChatInput: typeof import('./components/chat/ChatInput.vue')['default']
     ContentCandidateCard: typeof import('./components/chat/content/ContentCandidateCard.vue')['default']

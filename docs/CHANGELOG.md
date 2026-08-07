@@ -12,6 +12,21 @@ M0-M6（原始 work-plan 的全部里程碑）完成之后，零散的修改意�
 
 ---
 
+## 2026-08-06 新增"匹配创作会话"tab：选 Episode + 营销素材配对，并排看两边分析结果
+
+**用户意见 / 触发原因**：“现在要稍微改一下UI，要新增一个tab，在"营销素材"后面。叫"匹配创作会话"，有创建会话按钮，要选择哪个 Episode，哪个营销创意。创建后，进入会话会有剧情分析的结果，营销素材分析的结果。”——通过 AskUserQuestion 确认这是完全独立于现有 `/episodes/:id` 聊天/生成创意方案流程的新页面，这一步只做"配对 + 并排看两边分析结果"，不涉及聊天或生成方案。详细设计走了完整 plan mode，方案见 `.claude/plans/wiggly-jumping-cosmos.md`。
+
+**改了什么**：
+- 新表 `ab_matchSession`（`episodeId`/`adId`/`createTime`，均为外键，无额外状态字段——展示用的名字现查 `ab_episode.title`/`ab_ad.name`）。
+- 新增 `src/routes/matchSession/{createMatchSession,getMatchSessionList,getMatchSessionDetail,deleteMatchSession}.ts`：创建时校验 episode 和 ad 都必须是 `status==='analyzed'`（没分析完创建了也是空的）；`getMatchSessionDetail.ts` 的 `tileCandidateImages` 解析逻辑照抄 `getSessionState.ts`，保证复用 `EpisodeAnalysisPanel.vue` 时候选素材图片能正常显示。
+- 前端新增 `MatchSessionListView.vue`（列表 + 创建弹窗，两个 `t-select` 只列 `status==='analyzed'` 的 Episode/营销素材）和 `MatchSessionDetailView.vue`（两栏并排：左边 `EpisodeAnalysisPanel`、右边复用上一条改动抽出来的 `AdAnalysisPanel`）。`AppHeader.vue` 导航栏"营销素材"后面加了入口。
+- `EpisodeAnalysisPanel.vue` 加了可选 prop `defaultExpanded`（默认 `false`，聊天面板里的用法不受影响），这个新页面本来就是专门来看分析结果的，传 `true` 直接展开不用手动点。
+- `MatchSessionDetailView.vue` 从一开始就用 `watch(matchSessionId, ..., {immediate:true})` 而不是 `onMounted`——这个会话里已经在 `AdDetailView.vue` 踩过一次"同路由换 `:id` 参数、组件被复用不重新 mount"的坑，这次直接按正确写法来。
+
+**验证**：`npx tsc --noEmit -p .`、`npx vue-tsc -b --force` 均 clean；`sqlite3` 确认 `ab_matchSession` 自动建表成功、外键约束正确。Claude in Chrome 全程真实验证：创建会话 #1（Episode #57 × 营销素材 #23），详情页左边剧情分析默认展开正确显示剧情梗概/人物/情绪曲线，右边营销素材分析结果完整展示全部 9 个新维度（色号色块、渠道表格、5 个地区裂化卡片等均正确渲染，无截断）；又创建会话 #2（不同的 Episode #58 × 营销素材 #22，内容完全不同）后用 `location.hash` 在 `/match-sessions/1` 和 `/match-sessions/2` 之间来回切换，确认内容正确跟着刷新（验证了 `watch` 而不是 `onMounted` 这个坑真的避开了）；列表页确认两条记录都显示，删除会话 #2 后列表正确更新为只剩 #1；顺带确认 `AdDetailView.vue`（`/ads/23`）重构成用 `AdAnalysisPanel` 之后依然正常渲染，没有因为抽组件破坏原有展示。
+
+---
+
 ## 2026-08-06 "查看分析结果"从悬浮弹窗改成独立详情页，排版结构化
 
 **用户意见 / 触发原因**：“查看分析结果 不要是悬浮的，是需要点击进去看的，点击进去后里面的格式最好也要排版整齐”——上一版是 `t-dialog` 弹窗 + 纯 JSON pretty-print，用户希望是真正跳转的页面，且按字段结构化展示而不是一堆 JSON。

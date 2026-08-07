@@ -2,9 +2,11 @@
 import { ref } from "vue";
 import type { EpisodeAnalysis } from "@/stores/sessionAgent";
 
-defineProps<{ analysis: EpisodeAnalysis }>();
+// 聊天会话页面里默认折叠省地方；"匹配创作会话"详情页本来就是专门来看分析结果的，
+// 传 defaultExpanded 直接展开，不用用户手动点一下
+const props = withDefaults(defineProps<{ analysis: EpisodeAnalysis; defaultExpanded?: boolean }>(), { defaultExpanded: false });
 
-const collapsed = ref(true);
+const collapsed = ref(!props.defaultExpanded);
 
 const roleLabel: Record<string, string> = { protagonist: "主角", antagonist: "反派", supporting: "配角" };
 const roleTheme: Record<string, "primary" | "danger" | "default"> = { protagonist: "primary", antagonist: "danger", supporting: "default" };
